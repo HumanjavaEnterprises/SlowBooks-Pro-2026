@@ -391,7 +391,9 @@ def _update_detail_type(db: Session, account: Account, fields: dict) -> list[dic
     elif (
         "parent_id" in fields
         and _shares_parent(parent)
-        and not control_accounts.is_control_number(account.account_number)
+        and not control_accounts.is_control(
+            account.account_number, account.account_type
+        )
     ):
         # a control account never takes a parent's: the sub-account check
         # below says why it cannot go there
@@ -404,7 +406,7 @@ def _update_detail_type(db: Session, account: Account, fields: dict) -> list[dic
     if (
         detail != current
         and asked
-        and control_accounts.is_control_number(account.account_number)
+        and control_accounts.is_control(account.account_number, account.account_type)
     ):
         name, purpose = control_accounts.describe(account.account_number)
         raise HTTPException(
@@ -674,7 +676,13 @@ def update_account(account_id: int, data: AccountUpdate, db: Session = Depends(g
             # where that posting path resolves. (The account that already
             # holds a control number is handled above; this is a DIFFERENT
             # account moving onto one.)
-            _reject_reserved_number(fields["account_number"])
+            # The account's own name and type go with it, so restoring the
+            # control account itself into its empty slot is allowed.
+            _reject_reserved_number(
+                fields["account_number"],
+                fields.get("name", account.name),
+                fields.get("account_type", account.account_type),
+            )
         _reject_duplicate_number(db, fields["account_number"], exclude_id=account_id)
     if fields.get("parent_id") == account_id:
         raise HTTPException(

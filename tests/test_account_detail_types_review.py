@@ -363,7 +363,11 @@ def test_3900_is_locked_once_it_joins_the_control_registry(client, monkeypatch):
     registry = dict(control_accounts.CONTROL_ACCOUNTS)
     registry.setdefault(
         "3900",
-        ("Opening Balance Equity", "the balancing account for opening balances"),
+        (
+            "Opening Balance Equity",
+            "equity",
+            "the balancing account for opening balances",
+        ),
     )
     monkeypatch.setattr(control_accounts, "CONTROL_ACCOUNTS", registry)
 
@@ -391,3 +395,88 @@ def test_3900_is_locked_once_it_joins_the_control_registry(client, monkeypatch):
     r = client.put(f"/api/accounts/{acct['id']}", json={"account_type": "expense"})
     assert r.status_code == 400
     assert "control account" in r.json()["detail"]
+
+
+def test_an_expense_3900_takes_any_expense_detail_type(client, db_session):
+    # #413 keys the registry on number AND type: an expense 3900 (an imported
+    # chart's Miscellaneous Expense) is an ordinary account, so its detail
+    # type is not locked to anything.
+    from app.models.accounts import detail_type_problem
+
+    for detail in ("expense", "other_expense"):
+        assert detail_type_problem(detail, "expense", None, "3900") is None
+
+    misc = Account(
+        name="Miscellaneous Expense",
+        account_number="3900",
+        account_type=AccountType.EXPENSE,
+        detail_type="other_expense",
+    )
+    db_session.add(misc)
+    db_session.commit()
+    acct = _ok(client.get(f"/api/accounts/{misc.id}"))
+    assert acct["detail_type"] == "other_expense"
+    assert acct["is_control"] is False
+    acct = _ok(
+        client.put(f"/api/accounts/{acct['id']}", json={"detail_type": "expense"})
+    )
+    assert acct["detail_type"] == "expense"
+    acct = _ok(
+        client.put(f"/api/accounts/{acct['id']}", json={"detail_type": "other_expense"})
+    )
+    assert acct["detail_type"] == "other_expense"
+
+
+def test_an_equity_3900_keeps_its_detail_type_locked(monkeypatch):
+    # The matching half: an equity 3900 is Opening Balance Equity, so the
+    # lock applies. Equity has one detail type, so the lock is proven by
+    # moving the default it pins: it then names the control account.
+    from app.models import accounts as accounts_model
+    from app.models.accounts import DetailType, detail_type_problem
+
+    assert detail_type_problem("equity", "equity", None, "3900") is None
+    monkeypatch.setitem(
+        accounts_model._TYPE_DEFAULT, AccountType.EQUITY, DetailType.INCOME
+    )
+    why = detail_type_problem("equity", "equity", None, "3900")
+    assert why and "3900 Opening Balance Equity is a control account" in why
+    # an equity account on an ordinary number is not locked
+    assert detail_type_problem("equity", "equity", None, "3950") is None
+
+
+def test_a_blank_sub_account_of_a_moved_fixed_asset_previews_what_it_writes(
+    client, db_session, seed_accounts
+):
+    # 1500 Equipment (Fixed Asset) is already in the chart; the file puts it
+    # under 1400 Prepaid Expenses (Other Current Asset) and adds a blank
+    # 1550 Trucks under it. The dry run showed both as Other Current Asset,
+    # but the move was a "skip" the apply passed over, so Equipment stayed a
+    # Fixed Asset at the top and Trucks was written as a Fixed Asset.
+    csv = (
+        "Number,Name,Type,Detail type,Parent\n"
+        "1500,Equipment,asset,,1400\n"
+        "1550,Trucks,asset,,1500\n"
+    )
+    preview = _chart(client, csv, dry_run=1)
+    rows = {r["name"]: r for r in preview["rows"]}
+    assert rows["Equipment"]["action"] == "update"
+    assert "parent → 1400 Prepaid Expenses" in rows["Equipment"]["changes"]
+    planned = {n: r["detail_type"] for n, r in rows.items()}
+    assert planned == {
+        "Equipment": "other_current_asset",
+        "Trucks": "other_current_asset",
+    }
+
+    applied = _chart(client, csv, dry_run=0)
+    assert {r["name"]: r["detail_type"] for r in applied["rows"]} == planned
+    got = _by_name(db_session)
+    assert {n: got[n].detail_type for n in planned} == planned
+    assert got["Equipment"].parent_id == got["Prepaid Expenses"].id
+    assert got["Trucks"].parent_id == got["Equipment"].id
+
+    # a re-import of the same file moves nothing and changes nothing
+    again = _chart(client, csv, dry_run=1)
+    assert {r["name"]: r["action"] for r in again["rows"]} == {
+        "Equipment": "skip",
+        "Trucks": "skip",
+    }
