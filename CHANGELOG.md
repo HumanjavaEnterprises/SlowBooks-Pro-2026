@@ -533,6 +533,14 @@ gives a sub-account a detail type its parent cannot share, the child takes
 the parent's instead — the link is right, so the family stays together on
 the Profit & Loss — with a note naming the type the file asked for; under a
 bank, card, 1100 or 2000 parent it keeps its own.
+### Unreleased
+
+**A deposit QuickBooks prints under several numbers imports** (discussion #349). In a
+Transaction Detail by Account export, a bank deposit of several customer checks
+shows its bank line with no number and each income line with that check's own
+number. The ledger import grouped by number, so the deposit came apart into
+halves that only balance together and the file was refused. An unnumbered half
+and the same-day numbered halves that add up to it now post as one journal entry.
 
 ### v2.26.0 — Direct deposit from the page, and last year beside this one
 
