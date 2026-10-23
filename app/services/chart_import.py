@@ -487,7 +487,10 @@ class _Numbers:
             n = lo
             while n <= hi:
                 s = str(n)
-                if s not in self.used:
+                # never hand a numberless row a control account's number:
+                # the reserved-number guard (#425) would refuse it, and on an
+                # empty chart nothing else holds the slot
+                if s not in self.used and not control_accounts.is_control_number(s):
                     self.used.add(s)
                     return s
                 n += step
@@ -841,7 +844,7 @@ def _flag_parent_types(db: Session, plan: Plan) -> None:
             problem is None
             and acct is not None
             and moved
-            and takes_no_new_parent(child[2], child[4])
+            and takes_no_new_parent(child[2], child[4], child[1])
         ):
             problem = f"{child[0]} is found by its number and takes no parent"
         if problem is None:
