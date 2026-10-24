@@ -88,7 +88,7 @@ const TaxPage = {
         let taxBalance, summary, taxPicker = '';
         if (owedOn) {
             taxBalance = Math.max(Number(opts.amount) || 0, 0);
-            summary = `<strong>Amount owing:</strong> ${formatCurrency(taxBalance)}`;
+            summary = `<strong>${opts.refund ? 'Refund claimed' : 'Amount owing'}:</strong> ${formatCurrency(taxBalance)}`;
             if (opts.credits && opts.credits.amount > 0) {
                 summary += `<div class="hint" style="margin-top:4px;">The ${formatCurrency(opts.credits.amount)} of input tax credits claimed comes off their own account with this payment.</div>`;
             }
@@ -117,7 +117,7 @@ const TaxPage = {
                     <div class="form-group"><label>Date *</label>
                         <input name="date" type="date" required value="${todayISO()}"></div>
                     ${taxPicker}
-                    <div class="form-group"><label>Pay From Account *</label>
+                    <div class="form-group"><label>${opts.refund ? 'Deposited To' : 'Pay From Account'} *</label>
                         <select name="pay_from_account_id" required><option value="">Select...</option>${bankOpts}</select>${noBank}</div>
                     <div class="form-group"><label>Check #</label>
                         <input name="check_number"></div>
@@ -140,6 +140,7 @@ const TaxPage = {
             check_number: form.check_number.value || null,
         };
         if (form.tax_account_id) body.tax_account_id = parseInt(form.tax_account_id.value);
+        if (opts.refund) body.refund = true;
         if (opts.credits && opts.credits.amount > 0) {
             body.recoverable_account_id = opts.credits.account_id;
             body.recoverable_amount = opts.credits.amount;

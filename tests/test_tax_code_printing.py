@@ -221,3 +221,14 @@ def test_the_invoice_pdf_prints_the_components_and_number(
     for value in ("GST (5.00%)", "$10.00", "PST (7.00%)", "$14.00"):
         assert value in text, (value, text)
     assert "GST/HST Registration No. 123456789 RT0001" in text, text
+
+
+def test_a_zero_rated_sale_says_so(client, seed_customer, seed_accounts):
+    r = client.post(
+        "/api/tax-codes",
+        json={"name": "Zero-rated", "components": [{"name": "GST", "rate": 0}]},
+    )
+    assert r.status_code == 201, r.text
+    inv = _sale(client, "/api/invoices", seed_customer.id, tax_code_id=r.json()["id"])
+    text = _preview(client, f"/api/invoices/{inv['id']}/print-preview")
+    assert "Zero-rated (no tax charged) $0.00" in text

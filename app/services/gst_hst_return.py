@@ -195,6 +195,12 @@ def _notes(quebec: bool) -> list[str]:
         "Lines 113B and 113C (self-assessed GST/HST, lines 205 and 405) are not "
         "tracked by these books.",
         "Amounts are shown to the cent; the CRA's line 101 takes whole dollars.",
+        "Line 101 counts the period's invoices, sales receipts and credit memos. "
+        "Other revenue (deposits straight to income, interest, sales of capital "
+        "property) is not in it: add it before filing.",
+        "This is the regular method. A Quick Method filer reports differently "
+        "on lines 101 and 103 and claims no ITCs on operating expenses, so these "
+        "lines are not theirs to copy.",
     ]
     if quebec:
         notes.append(

@@ -86,3 +86,5 @@ class CanadaPresetRequest(StrictModel):
     # Nova Scotia only: also the 15% HST code for documents dated before
     # 2025-04-01, when the rate fell to 14%.
     include_before_2025_04_01: bool = False
+    # Also the codes for sales shipped to other provinces (place of supply)
+    include_other_provinces: bool = False

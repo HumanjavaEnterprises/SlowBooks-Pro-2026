@@ -1332,8 +1332,11 @@ const ReportsPage = {
                 </div>` : '';
             const owing = (data.lines.find(l => l.key === '115') || {}).amount || 0;
             const payable = ledger ? ledger.accounts.filter(a => a.payable) : [];
+            const refund = (data.lines.find(l => l.key === '114') || {}).amount || 0;
             const pay = owing > 0 && payable.length
                 ? `<button class="btn btn-primary" data-write onclick="ReportsPage.payGstHst()">Pay GST/HST…</button>`
+                : refund > 0 && payable.length
+                ? `<button class="btn btn-primary" data-write onclick="ReportsPage.payGstHst(true)">Record refund received…</button>`
                 : '';
             return `${ReportsPage._exportButtons('gst-hst-return', qs)}
                 <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}</p>
@@ -1346,6 +1349,8 @@ const ReportsPage = {
                     <div>Lines 104, 107, 110 and 111 are amounts the books do not hold (adjustments, instalments paid, rebates claimed). They are 0 until you type them in, and the totals follow.</div>
                     <div>Lines 113B and 113C add GST/HST you self-assess (lines 205 and 405), which these books do not track; any you have changes the refund or the amount owing. The CRA does not pay a refund of $2 or less.</div>
                     <div>Amounts are shown to the cent; the CRA's line 101 takes whole dollars.</div>
+                    <div>${Terms.text("Line 101 counts the period's invoices, sales receipts and credit memos. Other revenue (deposits straight to income, interest, sales of capital property) is not in it: add it before filing.")}</div>
+                    <div>This is the regular method. A Quick Method filer reports differently on lines 101 and 103 and claims no ITCs on operating expenses, so these lines are not theirs to copy.</div>
                     ${quebec}
                 </div>
                 <h4 style="margin:14px 0 4px; font-size:12px;">GST and HST by tax code</h4>
@@ -1368,21 +1373,22 @@ const ReportsPage = {
     // Pay what the return owes, on the GST/HST account, through the Sales
     // Tax payment; the return opens again on the same dates and amounts,
     // with the payment in its reconciliation.
-    payGstHst() {
+    payGstHst(refund = false) {
         const g = ReportsPage._gst;
         if (!g || !g.data.ledger) return;
-        const owing = (g.data.lines.find(l => l.key === '115') || {}).amount || 0;
+        const owing = (g.data.lines.find(l => l.key === (refund ? '114' : '115')) || {}).amount || 0;
         // ITCs in an account of their own (not netted on the GST/HST
         // account) come off it with the payment, or both balances would
         // grow every period while their sum read zero
         const itcAccounts = g.data.ledger.accounts.filter(a => !a.payable);
         const itc = (g.data.lines.find(l => l.key === '106') || {}).amount || 0;
         TaxPage.showPaySalesTax({
-            title: 'Pay GST/HST',
+            title: refund ? 'Record GST/HST refund' : 'Pay GST/HST',
+            refund,
             amount: owing,
             credits: itcAccounts.length === 1 && itc > 0 ? { account_id: itcAccounts[0].id, amount: itc } : null,
             taxAccounts: g.data.ledger.accounts.filter(a => a.payable),
-            done: 'GST/HST payment recorded',
+            done: refund ? 'GST/HST refund recorded' : 'GST/HST payment recorded',
             onDone: () => ReportsPage.gstHstReturn({ ...g.live, period: 'custom' }),
         });
     },

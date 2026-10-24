@@ -157,7 +157,11 @@ def create_canada_preset(data: CanadaPresetRequest, db: Session = Depends(get_db
 
     notes = canada_tax.notes(province, before_2025_04_01=before)
     new_codes = []
-    for plan in canada_tax.code_plans(province, before_2025_04_01=before):
+    for plan in canada_tax.code_plans(
+        province,
+        before_2025_04_01=before,
+        other_provinces=data.include_other_provinces,
+    ):
         found = db.query(TaxCode).filter(TaxCode.name == plan.name).first()
         if found is not None:
             existing["tax_codes"].append(_response(db, found))
@@ -197,7 +201,11 @@ def create_canada_preset(data: CanadaPresetRequest, db: Session = Depends(get_db
     from app.services.settings_service import get_setting_raw, set_setting
 
     if not (get_setting_raw(db, "default_tax_code_id") or "").strip():
-        first = canada_tax.code_plans(province, before_2025_04_01=before)[0]
+        first = canada_tax.code_plans(
+            province,
+            before_2025_04_01=before,
+            other_provinces=data.include_other_provinces,
+        )[0]
         main = db.query(TaxCode).filter(TaxCode.name == first.name).first()
         if main is not None:
             set_setting(db, "default_tax_code_id", str(main.id))

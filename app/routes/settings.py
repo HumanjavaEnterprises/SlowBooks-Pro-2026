@@ -86,6 +86,21 @@ def _check_default_tax_code(db: Session, cleaned: dict) -> None:
         )
 
 
+def _follow_tax_country_currency(db: Session, cleaned: dict) -> None:
+    """A company that turns to Canadian sales tax keeps its books in
+    Canadian dollars: the home currency follows the country from the
+    default, so a USD invoice is converted to CAD rather than taken as home
+    money at rate 1. A home currency someone set themselves is left alone."""
+    new = cleaned.get("tax_country")
+    if new is None or "home_currency" in cleaned:
+        return
+    home = (get_setting_raw(db, "home_currency") or "USD").upper()
+    if new == "CA" and home == "USD":
+        cleaned["home_currency"] = "CAD"
+    elif new == "US" and home == "CAD":
+        cleaned["home_currency"] = "USD"
+
+
 def _guard_tax_country(db: Session, cleaned: dict) -> None:
     """The sales tax country is chosen once (docs/design/canada.md). It can
     change until a document carries a tax code; after that the documents
@@ -249,6 +264,7 @@ def update_settings(
         )
     _guard_tax_country(db, cleaned)
     _check_default_tax_code(db, cleaned)
+    _follow_tax_country_currency(db, cleaned)
     for key, value in cleaned.items():
         set_setting(db, key, value)
     db.commit()

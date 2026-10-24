@@ -520,3 +520,53 @@ def test_tax_charged_without_a_code_is_named_on_the_return(
     assert ledger["uncoded_tax"] == 1.30
     assert [a["account_number"] for a in ledger["uncoded_accounts"]] == ["2200"]
     assert "1.30 of sales tax was charged on a typed rate" in data["notes"][0]
+
+
+def test_a_refund_received_clears_the_account(
+    client, canada, accounts, seed_customer, hst_on
+):
+    """Ontario, HST and its ITCs on one account: more claimed back than
+    collected, so the CRA pays the difference."""
+    _invoice(client, seed_customer.id, 100, tax_code_id=hst_on["id"])  # 13.00
+    _purchase(client, "/api/bills", _vendor(client), accounts, 1000, hst_on)  # 130
+    _, lines = _report(client)
+    assert lines["114"] == 117.00
+    r = client.post(
+        "/api/reports/sales-tax/pay",
+        json={
+            "date": "2026-09-30",
+            "amount": 117.00,
+            "pay_from_account_id": accounts["1000"].id,
+            "tax_account_id": accounts["2200"].id,
+            "refund": True,
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert _report(client)[0]["ledger"]["balance"] == 0
+
+
+def test_a_refund_clears_credits_kept_in_their_own_account(
+    client, canada, accounts, seed_customer, gst_qst
+):
+    _invoice(client, seed_customer.id, 100, tax_code_id=gst_qst["id"])  # GST 5
+    _purchase(client, "/api/bills", _vendor(client), accounts, 1000, gst_qst)  # 50
+    _, lines = _report(client)
+    assert lines["114"] == 45.00
+    r = client.post(
+        "/api/reports/sales-tax/pay",
+        json={
+            "date": "2026-09-30",
+            "amount": 45.00,
+            "pay_from_account_id": accounts["1000"].id,
+            "tax_account_id": accounts["2210"].id,
+            "recoverable_account_id": accounts["1450"].id,
+            "recoverable_amount": 50.00,
+            "refund": True,
+        },
+    )
+    assert r.status_code == 200, r.text
+    balances = {
+        a["account_number"]: a["balance"]
+        for a in _report(client)[0]["ledger"]["accounts"]
+    }
+    assert balances == {"2210": 0, "1450": 0}

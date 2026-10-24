@@ -172,6 +172,7 @@ def test_ontario_gets_one_hst_account_that_takes_its_itcs_too(
     assert out["rates_verified"] == canada_tax.RATES_VERIFIED
     assert [c["name"] for c in out["created"]["tax_codes"]] == [
         "HST ON 13%",
+        "HST ON 13% (no ITC)",
         "Zero-rated",
         "Exempt",
     ]
@@ -220,6 +221,7 @@ def test_quebec_claims_gst_and_qst_back_each_into_its_own_account(
     out = _preset(client, "QC")
     assert [c["name"] for c in out["created"]["tax_codes"]] == [
         "GST + QST QC 14.975%",
+        "GST + QST QC 14.975% (no ITC)",
         "GST 5%",
         "Zero-rated",
         "Exempt",
@@ -323,6 +325,7 @@ def test_a_gst_only_territory_gets_gst_and_nothing_provincial(
     out = _preset(client, "YT")
     assert [c["name"] for c in out["created"]["tax_codes"]] == [
         "GST 5%",
+        "GST 5% (no ITC)",
         "Zero-rated",
         "Exempt",
     ]
@@ -510,7 +513,11 @@ def test_the_settings_page_shows_canada_only_to_a_canadian_company():
 
     assert pages["posted"] == {
         "url": "/tax-codes/presets/canada",
-        "body": {"province": "QC", "include_before_2025_04_01": False},
+        "body": {
+            "province": "QC",
+            "include_before_2025_04_01": False,
+            "include_other_provinces": False,
+        },
     }
     assert "Tax codes added: GST + QST QC 14.975%." in pages["result"]
 
@@ -604,3 +611,55 @@ def test_a_us_company_never_sees_the_default_tax_code(client):
 def test_a_blank_gst_hst_number_is_pointed_out():
     src = (ROOT / "app/static/js/settings.js").read_text(encoding="utf-8")
     assert "No GST/HST registration number yet." in src
+
+
+def test_the_no_itc_code_puts_the_tax_in_the_cost(client, db_session, seed_accounts):
+    """A dental clinic's supplies (inputs to exempt sales): the vendor
+    charged HST, the clinic can't claim it, so it is part of the cost."""
+    _canadian(client, "ON")
+    _preset(client, "ON")
+    code = _codes(client)["HST ON 13% (no ITC)"]
+    assert [c["is_recoverable"] for c in code["components"]] == [False]
+    vendor = client.post("/api/vendors", json={"name": "Dental Supply"}).json()
+    r = client.post(
+        "/api/bills",
+        json={
+            "vendor_id": vendor["id"],
+            "date": DAY,
+            "tax_code_id": code["id"],
+            "lines": [
+                {
+                    "description": "Gloves",
+                    "quantity": 1,
+                    "rate": 100,
+                    "account_id": seed_accounts["6000"].id,
+                }
+            ],
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["total"] in (113, 113.0, "113.00")
+    assert _account(db_session, "2250").balance == 0
+
+
+def test_other_provinces_codes_for_shipping_out_of_province(client, seed_accounts):
+    _canadian(client, "AB")
+    out = _preset(client, "AB", include_other_provinces=True)
+    names = [c["name"] for c in out["created"]["tax_codes"]]
+    for want in ("HST ON 13%", "HST NS 14%", "HST NB 15%", "HST NL 15%", "HST PE 15%"):
+        assert want in names
+    assert names.count("GST 5%") == 1
+    hst_ns = _codes(client)["HST NS 14%"]
+    (comp,) = hst_ns["components"]
+    assert comp["is_recoverable"] and comp["level"] == "federal"
+
+
+def test_a_canadian_company_keeps_its_books_in_canadian_dollars(client, db_session):
+    from app.services.currency import home_currency
+
+    _canadian(client, "QC")
+    db_session.expire_all()
+    assert home_currency(db_session) == "CAD"
+    client.put("/api/settings", json={"tax_country": "US"})
+    db_session.expire_all()
+    assert home_currency(db_session) == "USD"

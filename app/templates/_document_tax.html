@@ -18,6 +18,8 @@
     {% endfor %}
     {% elif doc.tax_amount and doc.tax_amount != 0 %}
     <tr><td class="label">Tax ({{ doc.tax_rate | tax_percent }}%)</td><td class="r">{{ doc.tax_amount | currency(cur) }}</td></tr>
+    {% elif document_tax_status(doc) %}
+    <tr><td class="label">{{ document_tax_status(doc) }} (no tax charged)</td><td class="r">{{ 0 | currency(cur) }}</td></tr>
     {% endif %}
 {%- endmacro %}
 

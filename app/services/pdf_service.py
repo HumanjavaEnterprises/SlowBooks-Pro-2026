@@ -232,6 +232,26 @@ _jinja_env.filters["fdate"] = _format_date
 _jinja_env.globals["document_currency_code"] = document_currency_code
 _jinja_env.globals["document_tax_lines"] = document_tax_lines
 
+
+def document_tax_status(doc) -> str | None:
+    """The name of a 0% code a document was taxed under (Zero-rated,
+    Exempt), so it prints that no tax was charged and why: a customer
+    otherwise can't tell a zero-rated sale from tax left off by mistake.
+    None for any other document."""
+    from sqlalchemy.orm import object_session
+
+    from app.models.tax_codes import TaxCode
+
+    code_id = getattr(doc, "tax_code_id", None)
+    db = object_session(doc) if code_id is not None else None
+    code = db.get(TaxCode, code_id) if db is not None else None
+    if code is None or any(c.rate for c in code.components):
+        return None
+    return code.name
+
+
+_jinja_env.globals["document_tax_status"] = document_tax_status
+
 from app.services.addresses import city_line, country_line  # noqa: E402
 
 _jinja_env.globals["city_line"] = city_line

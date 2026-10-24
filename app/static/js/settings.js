@@ -2755,6 +2755,8 @@ SettingsPage._canadaPresets = function (s) {
             <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">A sale taxed on a typed rate instead of a code is not on the GST/HST return. Saved with Save Settings.</div></div>
         <div style="margin-bottom:12px;" data-admin data-write>
             <button type="button" class="btn btn-secondary" onclick="SettingsPage.setupCanadaTaxCodes(false)">Set up ${escapeHtml(name)} sales tax codes</button>${ns}
+            <button type="button" class="btn btn-secondary" onclick="SettingsPage.setupCanadaTaxCodes(false, true)">Also add codes for sales to other provinces</button>
+            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">A sale shipped to another province is taxed at that province's rate: its HST, or GST alone.</div>
             <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Adds the province's codes, GST alone where a provincial tax sits beside it, Zero-rated and Exempt, and the GST/HST, QST or PST payable accounts they post to. Codes and accounts already here are left as they are.</div>
             <div id="tax-presets-result" class="hint" role="status" style="margin-top:8px;" hidden></div>
         </div>`;
@@ -2767,8 +2769,8 @@ SettingsPage.changeTaxCountry = async function (sel) {
     const previous = value === 'CA' ? 'US' : 'CA';
     const others = SettingsPage.isDirty('tax_country');
     const msg = (value === 'CA'
-        ? 'Collect Canadian sales tax? Settings gains the GST/HST and QST registration numbers and the province tax codes, and the company address says Province and Postal Code. Nothing in your data changes.'
-        : 'Go back to United States sales tax? The Canadian settings and labels are hidden; tax codes already set up stay as they are. Nothing in your data changes.')
+        ? 'Collect Canadian sales tax? Settings gains the GST/HST and QST registration numbers and the province tax codes, the company address says Province and Postal Code, and the books are kept in Canadian dollars. Nothing already entered changes.'
+        : 'Go back to United States sales tax? The Canadian settings and labels are hidden, the books are kept in US dollars, and tax codes already set up stay as they are. Nothing already entered changes.')
         + (others ? '\n\nYour other unsaved changes on this page are saved with it.' : '');
     if (!confirm(msg)) { sel.value = previous; return; }
     const form = document.getElementById('settings-form');
@@ -2788,7 +2790,7 @@ SettingsPage.changeTaxCountry = async function (sel) {
 
 // The province saved in Settings, not the one on the picker: the button
 // names the saved one.
-SettingsPage.setupCanadaTaxCodes = async function (before20250401) {
+SettingsPage.setupCanadaTaxCodes = async function (before20250401, otherProvinces) {
     const el = document.getElementById('tax-presets-result');
     // one setup at a time: a second click while the first runs would race
     // it to the same code names and account numbers
@@ -2800,6 +2802,7 @@ SettingsPage.setupCanadaTaxCodes = async function (before20250401) {
         const r = await API.post('/tax-codes/presets/canada', {
             province: s.tax_province || '',
             include_before_2025_04_01: !!before20250401,
+            include_other_provinces: !!otherProvinces,
         });
         const names = list => list.map(x => escapeHtml(x.account_number ? `${x.account_number} ${x.name}` : x.name)).join(', ');
         const parts = [];

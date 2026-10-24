@@ -118,7 +118,10 @@ def percent(rate: Decimal) -> str:
 
 
 def code_plans(
-    province: Province, *, before_2025_04_01: bool = False
+    province: Province,
+    *,
+    before_2025_04_01: bool = False,
+    other_provinces: bool = False,
 ) -> list[CodePlan]:
     """The codes the preset makes for a province, in the order it makes them."""
     comps = province.components
@@ -150,6 +153,39 @@ def code_plans(
             # services in BC, say), so GST alone is a code of its own.
             CodePlan(f"GST {percent(GST)}", "GST alone", _GST_ONLY),
         ]
+    # The same tax paid on a purchase that earns no input tax credit (inputs
+    # to exempt sales, personal use, the half of meals not claimed): the
+    # tax is part of what it cost, as on any purchase whose tax is spread.
+    plans.insert(
+        1,
+        CodePlan(
+            f"{plans[0].name} (no ITC)",
+            f"{plans[0].description}, paid on a purchase that earns no input "
+            "tax credit: the tax is part of its cost",
+            comps,
+            recoverable=False,
+        ),
+    )
+    if other_provinces:
+        # Place of supply: a sale shipped to another province is taxed at
+        # that province's rate. Its HST, and GST alone for a GST-only or
+        # PST province, all owed on the one GST/HST account.
+        names = {p.name for p in plans}
+        for other in PROVINCES.values():
+            if other.code == province.code:
+                continue
+            if len(other.components) == 1 and other.components[0].name == "HST":
+                hst = other.components[0]
+                plan = CodePlan(
+                    f"HST {other.code} {percent(hst.rate)}",
+                    f"HST {percent(hst.rate)}, for sales to {other.name}",
+                    other.components,
+                )
+            else:
+                plan = CodePlan(f"GST {percent(GST)}", "GST alone", _GST_ONLY)
+            if plan.name not in names:
+                names.add(plan.name)
+                plans.append(plan)
     if before_2025_04_01 and province.code == "NS":
         plans.append(
             CodePlan(

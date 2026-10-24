@@ -32,6 +32,9 @@ class SalesTaxPaymentRequest(StrictModel):
     # bank pays the difference, which is `amount`.
     recoverable_account_id: Optional[int] = None
     recoverable_amount: Optional[Decimal] = None
+    # A refund received (a return whose credits exceed the tax collected):
+    # `amount` comes into the bank account instead of leaving it.
+    refund: bool = False
     check_number: Optional[str] = ""
     reference: Optional[str] = None
 
@@ -237,6 +240,65 @@ def pay_sales_tax(data: SalesTaxPaymentRequest, db: Session = Depends(get_db)):
             )
         if data.recoverable_account_id == tax_account_id:
             credits = Decimal("0")  # netted on the tax account already
+
+    if data.refund:
+        # The bank receives the refund. Credits kept in their own account
+        # come off it; the tax collected they were netted against comes off
+        # the tax account; with none, the refund is the tax account's own
+        # debit balance coming back.
+        if credits and credits < amount:
+            raise HTTPException(
+                status_code=400,
+                detail="A refund cannot be more than the input tax credits it "
+                "comes from",
+            )
+        journal_lines = [
+            {
+                "account_id": bank_account.id,
+                "debit": amount,
+                "credit": Decimal("0"),
+                "description": "Sales tax refund received",
+            }
+        ]
+        if credits:
+            if credits > amount:
+                journal_lines.append(
+                    {
+                        "account_id": tax_account_id,
+                        "debit": credits - amount,
+                        "credit": Decimal("0"),
+                        "description": "Sales tax refund received",
+                    }
+                )
+            journal_lines.append(
+                {
+                    "account_id": data.recoverable_account_id,
+                    "debit": Decimal("0"),
+                    "credit": credits,
+                    "description": "Input tax credits claimed",
+                }
+            )
+        else:
+            journal_lines.append(
+                {
+                    "account_id": tax_account_id,
+                    "debit": Decimal("0"),
+                    "credit": amount,
+                    "description": "Sales tax refund received",
+                }
+            )
+        txn = create_journal_entry(
+            db,
+            pay_date,
+            "Sales Tax Refund",
+            journal_lines,
+            source_type="sales_tax_payment",
+            reference=(
+                data.reference if data.reference is not None else data.check_number
+            ),
+        )
+        db.commit()
+        return {"status": "ok", "transaction_id": txn.id, "amount": float(amount)}
 
     journal_lines = [
         {
