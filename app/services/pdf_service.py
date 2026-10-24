@@ -177,6 +177,42 @@ def document_currency_code(doc, company_settings: dict) -> str:
     return code if code and code != home else ""
 
 
+def document_tax_lines(doc) -> list[dict]:
+    """A document's tax as its code's components print it, one total line
+    each ({name, rate, amount}): GST and PST as two amounts, the way a
+    Canadian receipt shows them and the way they were posted. Empty for a
+    document with no code (it prints its one Tax line, as always) or no
+    tax. The amounts come from component_amounts on the document's stored
+    tax_amount, so the printed lines always add up to the tax it charged,
+    even when an import brought that tax across as it was.
+
+    The code is read through the document's own session, so every render
+    path (PDF, print preview, emailed attachment) gets it without passing
+    it along; a document not attached to one prints its one Tax line."""
+    from decimal import Decimal
+
+    from sqlalchemy.orm import object_session
+
+    from app.models.tax_codes import TaxCode
+    from app.services.accounting import _q, taxable_subtotal
+    from app.services.tax_codes import component_amounts
+
+    code_id = getattr(doc, "tax_code_id", None)
+    tax_amount = _q(getattr(doc, "tax_amount", None) or 0)
+    if code_id is None or tax_amount == 0:
+        return []
+    db = object_session(doc)
+    code = db.get(TaxCode, code_id) if db is not None else None
+    if code is None or not code.components:
+        return []
+    amounts = component_amounts(code, taxable_subtotal(doc.lines), tax_amount)
+    return [
+        {"name": comp.name, "rate": Decimal(str(comp.rate or 0)), "amount": amount}
+        for comp, amount in amounts
+        if amount != 0
+    ]
+
+
 def _format_date(value):
     if not value:
         return ""
@@ -191,6 +227,7 @@ _jinja_env.filters["qty"] = _format_qty
 _jinja_env.filters["tax_percent"] = _format_tax_percent
 _jinja_env.filters["fdate"] = _format_date
 _jinja_env.globals["document_currency_code"] = document_currency_code
+_jinja_env.globals["document_tax_lines"] = document_tax_lines
 
 from app.services.addresses import city_line, country_line  # noqa: E402
 

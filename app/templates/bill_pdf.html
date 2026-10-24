@@ -1,3 +1,4 @@
+{% from "_document_tax.html" import tax_rows %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -98,9 +99,7 @@
     <div class="totals">
         <table>
             <tr><td class="label">Subtotal</td><td class="r">{{ bill.subtotal | currency }}</td></tr>
-            {% if bill.tax_amount and bill.tax_amount != 0 %}
-            <tr><td class="label">Tax ({{ bill.tax_rate | tax_percent }}%)</td><td class="r">{{ bill.tax_amount | currency }}</td></tr>
-            {% endif %}
+            {{ tax_rows(bill) }}
             <tr><td class="label grand">Total</td><td class="r grand">{{ bill.total | currency }}</td></tr>
             {% if bill.amount_paid and bill.amount_paid != 0 %}
             <tr><td class="label">Paid</td><td class="r">{{ bill.amount_paid | currency }}</td></tr>

@@ -1,0 +1,33 @@
+{# Shared tax lines for the sales and purchase document PDFs.
+
+   tax_rows: a document with a tax code prints a total line per component
+   ("GST (5.00%)", "PST (7.00%)"), since a Canadian customer has to see
+   each tax to claim it back; one with no code prints its one Tax line,
+   exactly as it always has.
+
+   registration_lines: the company's GST/HST and QST registration numbers,
+   which a Canadian sales document must show for the customer to claim the
+   tax. Both settings are blank unless a Canadian company fills them in, so
+   a US company's documents print nothing here. #}
+
+{% macro tax_rows(doc, cur=None) -%}
+    {% set components = document_tax_lines(doc) %}
+    {% if components %}
+    {% for c in components %}
+    <tr><td class="label">{{ c.name }} ({{ c.rate | tax_percent }}%)</td><td class="r">{{ c.amount | currency(cur) }}</td></tr>
+    {% endfor %}
+    {% elif doc.tax_amount and doc.tax_amount != 0 %}
+    <tr><td class="label">Tax ({{ doc.tax_rate | tax_percent }}%)</td><td class="r">{{ doc.tax_amount | currency(cur) }}</td></tr>
+    {% endif %}
+{%- endmacro %}
+
+{% macro registration_lines(company) -%}
+    {% set gst_hst = (company.gst_hst_registration_number or '') | trim %}
+    {% set qst = (company.qst_registration_number or '') | trim %}
+    {% if gst_hst or qst %}
+    <div class="company-info tax-registration">
+        {% if gst_hst %}GST/HST Registration No. {{ gst_hst }}{% if qst %}<br>{% endif %}{% endif %}
+        {% if qst %}QST Registration No. {{ qst }}{% endif %}
+    </div>
+    {% endif %}
+{%- endmacro %}

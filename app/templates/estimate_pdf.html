@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+{% from "_document_tax.html" import tax_rows, registration_lines %}
 <html lang="en">
 <head>
     <title>Estimate</title>
@@ -48,6 +49,7 @@
                 {% if company.company_phone %}{{ company.company_phone }}<br>{% endif %}
                 {% if company.company_email %}{{ company.company_email }}{% endif %}
             </div>
+            {{ registration_lines(company) }}
         </div>
         <div class="doc-title">
             <h1>ESTIMATE</h1>
@@ -92,9 +94,7 @@
     <div class="totals">
         <table>
             <tr><td class="label">Subtotal</td><td class="r">{{ est.subtotal | currency }}</td></tr>
-            {% if est.tax_amount and est.tax_amount != 0 %}
-            <tr><td class="label">Tax ({{ est.tax_rate | tax_percent }}%)</td><td class="r">{{ est.tax_amount | currency }}</td></tr>
-            {% endif %}
+            {{ tax_rows(est) }}
             <tr><td class="label grand">Total</td><td class="r grand">{{ est.total | currency }}</td></tr>
         </table>
     </div>

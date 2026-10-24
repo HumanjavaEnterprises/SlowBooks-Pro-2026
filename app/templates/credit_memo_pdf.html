@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+{% from "_document_tax.html" import tax_rows, registration_lines %}
 <html lang="en">
 <head>
     <title>Credit Memo</title>
@@ -50,6 +51,7 @@
                 {% if company.company_phone %}{{ company.company_phone }}<br>{% endif %}
                 {% if company.company_email %}{{ company.company_email }}{% endif %}
             </div>
+            {{ registration_lines(company) }}
         </div>
         <div class="doc-title">
             <h1>CREDIT MEMO</h1>
@@ -103,9 +105,7 @@
     <div class="totals">
         <table>
             <tr><td class="label">Subtotal</td><td class="r">{{ cm.subtotal | currency }}</td></tr>
-            {% if cm.tax_amount and cm.tax_amount != 0 %}
-            <tr><td class="label">Tax ({{ cm.tax_rate | tax_percent }}%)</td><td class="r">{{ cm.tax_amount | currency }}</td></tr>
-            {% endif %}
+            {{ tax_rows(cm) }}
             <tr><td class="label grand">Total Credit</td><td class="r grand">{{ cm.total | currency }}</td></tr>
             {% if cm.amount_applied and cm.amount_applied != 0 %}
             <tr><td class="label">Applied</td><td class="r">{{ cm.amount_applied | currency }}</td></tr>

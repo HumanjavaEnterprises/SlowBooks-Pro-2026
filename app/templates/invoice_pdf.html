@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+{% from "_document_tax.html" import tax_rows, registration_lines %}
 <html lang="en">
 <head>
     {% set kind = doc_kind if doc_kind is defined else ('SalesReceipt' if inv.is_sales_receipt else 'Invoice') %}
@@ -58,6 +59,7 @@
                 {% if company.company_phone %}{{ company.company_phone }}<br>{% endif %}
                 {% if company.company_email %}{{ company.company_email }}{% endif %}
             </div>
+            {% if not nonprofit %}{{ registration_lines(company) }}{% endif %}{# a gift carries no tax to claim #}
         </div>
         <div class="invoice-title">
             <h1>{% if kind == 'DonationReceipt' %}DONATION RECEIPT{% elif kind == 'Pledge' %}PLEDGE{% elif kind == 'SalesReceipt' %}SALES RECEIPT{% else %}INVOICE{% endif %}</h1>
@@ -131,9 +133,7 @@
     <div class="totals">
         <table>
             <tr><td class="label">Subtotal</td><td class="r">{{ inv.subtotal | currency(cur) }}</td></tr>
-            {% if inv.tax_amount and inv.tax_amount != 0 %}
-            <tr><td class="label">Tax ({{ inv.tax_rate | tax_percent }}%)</td><td class="r">{{ inv.tax_amount | currency(cur) }}</td></tr>
-            {% endif %}
+            {{ tax_rows(inv, cur) }}
             <tr><td class="label grand">{% if kind == 'DonationReceipt' %}Contribution{% elif kind == 'Pledge' %}Pledge Amount{% else %}Total{% endif %}</td><td class="r grand">{{ inv.total | currency(cur) }}</td></tr>
             {% if inv.is_sales_receipt %}
             {# Paid at the time of sale — no balance line on a receipt. #}
