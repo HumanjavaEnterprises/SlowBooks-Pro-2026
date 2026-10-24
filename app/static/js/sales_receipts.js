@@ -125,6 +125,7 @@ const SalesReceiptsPage = {
         const classGroup = await classFormGroupHtml(null);
         // narrowed to the customer's jobs; a blank customer is the walk-in
         const jobGroup = await jobFormGroupHtml(null, 'sr-customer-select');
+        await TaxCodes.load();
 
         SalesReceiptsPage.lineCount = sr.lines.length;
         SalesReceiptsPage._items = items;
@@ -172,6 +173,7 @@ const SalesReceiptsPage = {
                             <option value="">Undeposited Funds (default)</option>${bankOpts}</select></div>
                     ${classGroup}${jobGroup}
                     ${currencyFormGroupsHtml(null, null)}
+                    ${TaxCodes.groupHtml(null, 'SalesReceiptsPage.recalc()')}
                     <div class="form-group"><label>Tax Rate (%)</label>
                         <input name="tax_rate" type="number" step="0.0001" value="${+((sr.tax_rate || 0) * 100).toFixed(4)}"
                             oninput="SalesReceiptsPage.recalc()"></div>
@@ -208,6 +210,7 @@ const SalesReceiptsPage = {
                     <button type="submit" class="btn btn-primary">Record ${T('Sales Receipt')}</button>
                 </div>
             </form>`);
+        TaxCodes.sync($('#sales-receipt-form'));
         // the totals carry the receipt's currency; follow a change of it
         $('#sales-receipt-form [name="currency"]')?.addEventListener('change', () => SalesReceiptsPage.recalc());
         SalesReceiptsPage.recalc();
@@ -258,8 +261,13 @@ const SalesReceiptsPage = {
             const taxInput = form.querySelector('[name="tax_rate"]');
             const r = ScanHelper.taxPercent(value, sub, meta && meta.text);
             if (r.error) { SalesReceiptsPage.recalc(); return { error: r.error }; }
+            // the receipt's own rate is a rate typed, not a tax code's; a
+            // code taken off is said, since its components stop being tracked
+            const had = TaxCodes.selected(form);
+            TaxCodes.choose(form, null);
             if (taxInput) taxInput.value = r.pct;
             SalesReceiptsPage.recalc();
+            if (had) return { note: `, tax code ${had.name} taken off and the tax rate set to ${r.pct}%.` };
             return { note: `— tax rate set to ${r.pct}%.` };
         }
         SalesReceiptsPage.recalc();
@@ -300,6 +308,7 @@ const SalesReceiptsPage = {
                         rateInput.value = parseFloat(result.subtotal).toFixed(2);
                         const taxRate = (parseFloat(result.tax) / parseFloat(result.subtotal)) * 100;
                         const taxInput = form.querySelector('[name="tax_rate"]');
+                        TaxCodes.choose(form, null);
                         if (taxInput) taxInput.value = +taxRate.toFixed(4);
                     } else {
                         rateInput.value = total.toFixed(2);
@@ -376,7 +385,8 @@ const SalesReceiptsPage = {
     recalc() {
         TaxExempt.enforce(SalesReceiptsPage._customers, $('#sr-customer-select')?.value, $('#sr-lines'));
         const cur = $('#sales-receipt-form [name="currency"]')?.value;
-        const t = SalesLines.totals($('#sr-lines'), $('#sales-receipt-form [name="tax_rate"]')?.value, cur);
+        const rate = $('#sales-receipt-form [name="tax_rate"]')?.value;
+        const t = SalesLines.totals($('#sr-lines'), TaxCodes.taxPct($('#sales-receipt-form'), rate), cur);
         SalesLines.show(t, ['sr-subtotal', 'sr-tax', 'sr-total'], cur);
         return t;
     },
@@ -413,6 +423,7 @@ const SalesReceiptsPage = {
             job_id: jobIdFromForm(form),
             ...currencyPayloadFromForm(form),
             tax_rate: (parseFloat(form.tax_rate.value) || 0) / 100,
+            ...TaxCodes.payload(form),
             notes: form.notes.value || null,
             fair_value_amount: form.fair_value_amount && form.fair_value_amount.value ? parseFloat(form.fair_value_amount.value) : null,
             fair_value_description: form.fair_value_description ? (form.fair_value_description.value || null) : null,

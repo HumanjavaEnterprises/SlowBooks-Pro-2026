@@ -71,12 +71,19 @@ const SalesLines = {
             if (cell) cell.textContent = SalesLines.money(amount, currency);
         });
         subtotal = SalesLines.cents(subtotal);
-        // a tax code's components (an array of percents) are each taxed and
-        // rounded on their own, as the server does
-        const tax = Array.isArray(taxPct)
-            ? SalesLines.cents(taxPct.reduce((sum, pct) => sum + SalesLines.tax(SalesLines.cents(taxable), pct), 0))
-            : SalesLines.tax(SalesLines.cents(taxable), taxPct);
+        const tax = SalesLines.taxOn(taxable, taxPct);
         return { subtotal, tax, total: SalesLines.cents(subtotal + tax) };
+    },
+
+    // Tax on an amount at what TaxCodes.taxPct gives: one percent typed, or
+    // a tax code's component percents (an array), each taxed and rounded on
+    // its own, as the server does. The purchase forms, which have no
+    // per-line tax, call it on their subtotal.
+    taxOn(amount, taxPct) {
+        const base = SalesLines.cents(amount);
+        return Array.isArray(taxPct)
+            ? SalesLines.cents(taxPct.reduce((sum, pct) => sum + SalesLines.tax(base, pct), 0))
+            : SalesLines.tax(base, taxPct);
     },
 
     // Tax on an amount at a percent typed on a form, to the cent, half up:

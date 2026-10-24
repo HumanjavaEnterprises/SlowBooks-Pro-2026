@@ -5,7 +5,9 @@
  * a code chosen, the rate box shows the code's combined rate and is not
  * typed in, and the form's totals tax each component and round it on its
  * own, as the server does (so 5% + 7% of $10.10 is $1.22, not $1.21). With
- * none, the form is exactly what it was: one rate, typed.
+ * none, the form is exactly what it was: one rate, typed. The bill form has
+ * no rate box: its picker sits with the header fields, and its totals show
+ * the code's tax and the part of it a recoverable component claims back.
  *
  * A new document is offered the current codes; a document that already has
  * an archived one keeps it on its picker, so editing it never changes its
@@ -39,16 +41,44 @@ const TaxCodes = {
 
     // The picker's form group, or '' when the company has no codes. Call
     // after load(). `onchange` is the page's recalc (a string of JS).
-    groupHtml(selectedId, onchange) {
+    // `noneLabel` names the no-code choice on a form with no rate to type
+    // (a bill keeps the rate it has).
+    groupHtml(selectedId, onchange, noneLabel = 'None (the rate typed)') {
         const offered = TaxCodes._codes.filter(c => !c.is_archived || String(c.id) === String(selectedId));
         if (!offered.length) return '';
-        const opts = offered.map(c =>
-            `<option value="${c.id}" ${String(c.id) === String(selectedId) ? 'selected' : ''}>${escapeHtml(TaxCodes.label(c))}</option>`
-        ).join('');
+        const opts = offered.map(c => TaxCodes._optionHtml(c, String(c.id) === String(selectedId))).join('');
         return `<div class="form-group"><label>Tax Code</label>
             <select name="tax_code_id" onchange="TaxCodes.sync(this.form); ${onchange}">
-                <option value="">None (the rate typed)</option>${opts}
+                <option value="">${escapeHtml(noneLabel)}</option>${opts}
             </select></div>`;
+    },
+
+    _optionHtml(code, selected) {
+        return `<option value="${code.id}" ${selected ? 'selected' : ''}>${escapeHtml(TaxCodes.label(code))}</option>`;
+    },
+
+    // Put `id` on the form's picker (null for none), as picking another
+    // document does: a credit memo takes the code of the invoice it
+    // credits. That code may be archived, so it is added to the picker if
+    // the picker does not offer it, and the picker itself is added, before
+    // the Tax Rate box, when the form opened with nothing to offer.
+    choose(form, id, onchange) {
+        if (!form) return;
+        let sel = form.querySelector('[name="tax_code_id"]');
+        const code = id != null ? TaxCodes.byId(id) : null;
+        if (!sel && code) {
+            const box = form.querySelector('[name="tax_rate"]');
+            const group = box && box.closest ? box.closest('.form-group') : null;
+            if (group) group.insertAdjacentHTML('beforebegin', TaxCodes.groupHtml(code.id, onchange));
+            sel = form.querySelector('[name="tax_code_id"]');
+        }
+        if (sel) {
+            if (code && ![...sel.options].some(o => String(o.value) === String(code.id))) {
+                sel.insertAdjacentHTML('beforeend', TaxCodes._optionHtml(code, false));
+            }
+            sel.value = code ? String(code.id) : '';
+        }
+        TaxCodes.sync(form);
     },
 
     // The code chosen on `form`, or null.
@@ -81,8 +111,34 @@ const TaxCodes = {
         return code.components.map(c => +(parseFloat(c.rate || 0) * 100).toFixed(4));
     },
 
-    // The payload field: the code's id, or null for none.
+    // Each component's tax on `base` for the code chosen on `form`, rounded
+    // on its own as the server posts it ([{component, amount}]), or null
+    // when no code is chosen.
+    amounts(form, base) {
+        const code = TaxCodes.selected(form);
+        if (!code) return null;
+        return code.components.map(c => ({
+            component: c,
+            amount: SalesLines.tax(SalesLines.cents(base), +(parseFloat(c.rate || 0) * 100).toFixed(4)),
+        }));
+    },
+
+    // The part of a purchase's tax that is claimed back, for the code chosen
+    // on `form`: what posts to the recoverable accounts, not to the lines.
+    recoverable(form, base) {
+        const parts = (TaxCodes.amounts(form, base) || [])
+            .filter(p => p.component.is_recoverable && p.component.recoverable_account_id);
+        return {
+            amount: SalesLines.cents(parts.reduce((sum, p) => sum + p.amount, 0)),
+            names: parts.map(p => p.component.name),
+        };
+    },
+
+    // The payload field: the code's id, or null for none. A form with no
+    // picker (no codes, or they could not be read) sends nothing, so an
+    // edit keeps the code its document has rather than clearing it.
     payload(form) {
+        if (!form || !form.querySelector('[name="tax_code_id"]')) return {};
         const code = TaxCodes.selected(form);
         return { tax_code_id: code ? code.id : null };
     },

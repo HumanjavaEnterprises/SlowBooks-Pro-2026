@@ -143,6 +143,7 @@ const EstimatesPage = {
         const classGroup = await classFormGroupHtml(est.class_id);
         const jobGroup = await jobFormGroupHtml(est.job_id, 'est-customer-select');
         await CostCodes.load();
+        await TaxCodes.load();
         if (est.lines.length === 0) est.lines = [{ item_id: '', description: '', quantity: 1, rate: 0 }];
 
         EstimatesPage.lineCount = est.lines.length;
@@ -170,6 +171,7 @@ const EstimatesPage = {
                         <input name="date" type="date" required value="${est.date}"></div>
                     <div class="form-group"><label>Expiration Date</label>
                         <input name="expiration_date" type="date" value="${est.expiration_date || ''}"></div>
+                    ${TaxCodes.groupHtml(est.tax_code_id, 'EstimatesPage.recalc()')}
                     <div class="form-group"><label>Tax Rate (%)</label>
                         <input name="tax_rate" type="number" step="0.0001" value="${+((est.tax_rate || 0) * 100).toFixed(4)}"
                             oninput="EstimatesPage.recalc()"></div>
@@ -244,7 +246,8 @@ const EstimatesPage = {
 
     recalc() {
         TaxExempt.enforce(EstimatesPage._customers, $('#est-customer-select')?.value, $('#est-lines'));
-        const t = SalesLines.totals($('#est-lines'), $('#est-form [name="tax_rate"]')?.value);
+        const rate = $('#est-form [name="tax_rate"]')?.value;
+        const t = SalesLines.totals($('#est-lines'), TaxCodes.taxPct($('#est-form'), rate));
         SalesLines.show(t, ['est-subtotal', 'est-tax', 'est-total']);
         return t;
     },
@@ -272,6 +275,7 @@ const EstimatesPage = {
             date: form.date.value,
             expiration_date: form.expiration_date.value || null,
             tax_rate: (parseFloat(form.tax_rate.value) || 0) / 100,
+            ...TaxCodes.payload(form),
             notes: form.notes.value || null,
             class_id: classIdFromForm(form),
             job_id: jobIdFromForm(form),

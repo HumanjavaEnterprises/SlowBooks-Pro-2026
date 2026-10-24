@@ -63,6 +63,7 @@ const RecurringPage = {
         };
         if (id) rec = await API.get(`/recurring/${id}`);
         const classGroup = await classFormGroupHtml(rec.class_id);
+        await TaxCodes.load();
         if (rec.lines.length === 0) rec.lines = [{ item_id: '', description: '', quantity: 1, rate: 0 }];
         RecurringPage.lineCount = rec.lines.length;
 
@@ -90,6 +91,7 @@ const RecurringPage = {
                             ${['Net 15','Net 30','Net 45','Net 60','Due on Receipt'].map(t =>
                                 `<option value="${t}" ${rec.terms===t?'selected':''}>${t}</option>`).join('')}
                         </select></div>
+                    ${TaxCodes.groupHtml(rec.tax_code_id, 'RecurringPage.recalc()')}
                     <div class="form-group"><label>Tax Rate (%)</label>
                         <input name="tax_rate" type="number" step="0.0001" value="${+((rec.tax_rate || 0) * 100).toFixed(4)}" oninput="RecurringPage.recalc()"></div>
                     ${classGroup}
@@ -160,7 +162,8 @@ const RecurringPage = {
 
     recalc() {
         TaxExempt.enforce(RecurringPage._customers, $('#rec-customer-select')?.value, $('#rec-lines'));
-        const t = SalesLines.totals($('#rec-lines'), $('#rec-form [name="tax_rate"]')?.value);
+        const rate = $('#rec-form [name="tax_rate"]')?.value;
+        const t = SalesLines.totals($('#rec-lines'), TaxCodes.taxPct($('#rec-form'), rate));
         SalesLines.show(t, ['rec-subtotal', 'rec-tax', 'rec-total']);
         return t;
     },
@@ -184,6 +187,7 @@ const RecurringPage = {
             end_date: form.end_date.value || null,
             terms: form.terms.value,
             tax_rate: (parseFloat(form.tax_rate.value) || 0) / 100,
+            ...TaxCodes.payload(form),
             notes: form.notes.value || null,
             class_id: classIdFromForm(form),
             lines,

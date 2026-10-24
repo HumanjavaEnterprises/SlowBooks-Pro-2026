@@ -82,7 +82,7 @@ const BillsPage = {
             </table></div>
             <div class="invoice-totals">
                 <div class="total-row"><span class="label">Subtotal</span><span class="value">${formatCurrency(bill.subtotal)}</span></div>
-                ${Number(bill.tax_amount) ? `<div class="total-row" title="Part of what the goods cost: it posts with the lines, not to Sales Tax Payable"><span class="label">Tax</span><span class="value">${formatCurrency(bill.tax_amount)}</span></div>` : ''}
+                ${Number(bill.tax_amount) ? `<div class="total-row" title="${bill.tax_code_id ? 'Under a tax code: a recoverable component posts to its own account, the rest with the lines' : 'Part of what the goods cost: it posts with the lines, not to Sales Tax Payable'}"><span class="label">Tax</span><span class="value">${formatCurrency(bill.tax_amount)}</span></div>` : ''}
                 <div class="total-row grand-total"><span class="label">Total</span><span class="value">${formatCurrency(bill.total)}</span></div>
                 <div class="total-row"><span class="label">Paid</span><span class="value">${formatCurrency(bill.amount_paid)}</span></div>
                 <div class="total-row grand-total"><span class="label">Balance</span><span class="value">${formatCurrency(bill.balance_due)}</span></div>
@@ -229,15 +229,28 @@ const BillsPage = {
         BillsPage._items = items;
         BillsPage._accounts = PurchaseAccounts.filter(accounts, ...(bill ? bill.lines.map(l => l.account_id) : []));
         BillsPage._defaultExpenseAccountId = null;
-        // A bill's tax rate (set through the API, #250) is kept by the save,
-        // so the form shows its tax and a total that is the bill's (2.22.1
-        // gate, NEW-47: a $35.42 bill opened as $33.72).
-        BillsPage._taxRate = bill ? Number(bill.tax_rate) || 0 : 0;
         BillsPage.lineCount = 1;
         const classGroup = await classFormGroupHtml(bill ? bill.class_id : undefined);
         const jobGroup = await jobFormGroupHtml(bill ? bill.job_id : null);
         await CostCodes.load();
         await Nonprofit.loadFunds();
+        await TaxCodes.load();
+        // A bill's tax rate (set through the API, #250) is kept by the save,
+        // so the form shows its tax and a total that is the bill's (2.22.1
+        // gate, NEW-47: a $35.42 bill opened as $33.72).
+        // A bill under a tax code is taxed by the code (each component
+        // rounded on its own, a recoverable one claimed back); its stored
+        // rate is only the code's rates added up, so it is not "its own"
+        // rate to fall back on when the code is taken off. If the codes
+        // could not be read, the stored rate is what the form can show.
+        const ownCode = bill && bill.tax_code_id ? TaxCodes.byId(bill.tax_code_id) : null;
+        BillsPage._hadCode = !!ownCode;
+        BillsPage._taxRate = bill && !ownCode ? Number(bill.tax_rate) || 0 : 0;
+        // A bill has no rate to type: without a code it keeps the rate it has.
+        const ownPct = Number((BillsPage._taxRate * 100).toFixed(4));
+        const codeGroup = TaxCodes.groupHtml(bill ? bill.tax_code_id : null, 'BillsPage.recalc()',
+            BillsPage._taxRate ? `None (this bill's ${ownPct}%)` : 'None');
+        const taxRows = !!(BillsPage._taxRate || codeGroup);
 
         BillsPage._vendors = vendors;
         const terms = bill && bill.terms ? bill.terms : 'Net 30';
@@ -261,6 +274,7 @@ const BillsPage = {
                         </select></div>
                     ${classGroup}${jobGroup}
                     ${currencyFormGroupsHtml(bill ? bill.currency : undefined, bill ? bill.exchange_rate : undefined)}
+                    ${codeGroup}
                 </div>
                 <h3 style="margin:12px 0 8px;font-size:14px;">Line Items</h3>
                 <div class="table-container table-container--scroll"><table class="line-items-table bill-lines-table">
@@ -269,8 +283,9 @@ const BillsPage = {
                 </table></div>
                 <button type="button" class="btn btn-sm btn-secondary" style="margin-top:8px;" onclick="BillsPage.addLine()">+ Add Line</button>
                 <div class="invoice-totals">
-                    ${BillsPage._taxRate ? `<div class="total-row"><span class="label">Subtotal</span><span class="value" id="bill-subtotal">$0.00</span></div>
-                    <div class="total-row" title="Part of what the goods cost: it posts with the lines, not to Sales Tax Payable"><span class="label">Tax (${Number((BillsPage._taxRate * 100).toFixed(4))}%)</span><span class="value" id="bill-tax">$0.00</span></div>` : ''}
+                    ${taxRows ? `<div class="total-row" id="bill-subtotal-row"><span class="label">Subtotal</span><span class="value" id="bill-subtotal">$0.00</span></div>
+                    <div class="total-row" id="bill-tax-row" title="Part of what the goods cost: it posts with the lines, not to Sales Tax Payable"><span class="label">Tax (${ownPct}%)</span><span class="value" id="bill-tax">$0.00</span></div>
+                    <div class="total-row" id="bill-recoverable-row" hidden title="Tax claimed back: it posts to the component's own account, not with the lines"><span class="label">Recoverable</span><span class="value" id="bill-recoverable">$0.00</span></div>` : ''}
                     <div class="total-row grand-total"><span class="label">Total</span><span class="value" id="bill-total">$0.00</span></div>
                 </div>
                 <div class="form-group" style="margin-top:12px;"><label>Notes</label>
@@ -287,6 +302,7 @@ const BillsPage = {
             bill.lines.forEach(l => BillsPage.addLine(l));
             BillsPage.recalc();
         } else {
+            if (taxRows) BillsPage.recalc();
             ScanHelper.wire(BillsPage._applyScan, BillsPage._applyScanField, BillsPage._scanFieldTarget);
             if (startVendor) {
                 const sel = document.getElementById('bill-vendor');
@@ -441,13 +457,42 @@ const BillsPage = {
             if (amountCell) amountCell.textContent = formatCurrency(amount);
         });
         subtotal = PurchaseLines.cents(subtotal);
-        // the tax as the server works it: the rate on the subtotal, to the cent
-        const tax = PurchaseLines.cents(subtotal * (BillsPage._taxRate || 0));
+        // the tax as the server works it: the rate on the subtotal, to the
+        // cent, or a tax code's components each rounded on their own
+        const form = $('#bill-form');
+        const code = TaxCodes.selected(form);
+        const tax = code
+            ? SalesLines.taxOn(subtotal, TaxCodes.taxPct(form, 0))
+            : PurchaseLines.cents(subtotal * (BillsPage._taxRate || 0));
         const total = PurchaseLines.cents(subtotal + tax);
         const subEl = $('#bill-subtotal');
         if (subEl) subEl.textContent = formatCurrency(subtotal);
         const taxEl = $('#bill-tax');
-        if (taxEl) taxEl.textContent = formatCurrency(tax);
+        if (taxEl) {
+            taxEl.textContent = formatCurrency(tax);
+            const label = taxEl.previousElementSibling;
+            if (label) label.textContent = code ? `Tax (${code.name})` : `Tax (${Number((BillsPage._taxRate * 100).toFixed(4))}%)`;
+            // no tax at all: the total alone, as a bill without one shows it
+            const taxed = !!(code || BillsPage._taxRate);
+            const subRow = $('#bill-subtotal-row'), taxRow = $('#bill-tax-row');
+            if (subRow) subRow.hidden = !taxed;
+            if (taxRow) {
+                taxRow.hidden = !taxed;
+                taxRow.title = code
+                    ? 'Under a tax code: a recoverable component posts to its own account, the rest with the lines'
+                    : 'Part of what the goods cost: it posts with the lines, not to Sales Tax Payable';
+            }
+        }
+        // the part a tax code claims back, which is no part of the lines' cost
+        const recRow = $('#bill-recoverable-row');
+        if (recRow) {
+            const rec = TaxCodes.recoverable(form, subtotal);
+            recRow.hidden = !rec.amount;
+            const label = recRow.querySelector('.label');
+            if (label) label.textContent = rec.names.length ? `Recoverable (${rec.names.join(', ')})` : 'Recoverable';
+            const value = $('#bill-recoverable');
+            if (value) value.textContent = formatCurrency(rec.amount);
+        }
         const totalEl = $('#bill-total');
         if (totalEl) totalEl.textContent = formatCurrency(total);
         return total;
@@ -520,6 +565,10 @@ const BillsPage = {
         if (!(await ClassWarn.ok(form, { rows: '#bill-lines tr', cls: 'line-function' }))) return;
         try {
             const vendorId = await VendorQuickAdd.ensure('bill-vendor');
+            // A code taken off a bill takes its tax with it: the rate the
+            // bill stored was the code's, and there is no rate box to keep.
+            const taxCode = TaxCodes.payload(form);
+            if (BillsPage._hadCode && taxCode.tax_code_id === null) taxCode.tax_rate = 0;
             const body = {
                 vendor_id: vendorId,
                 bill_number: form.bill_number.value.trim() || null,
@@ -529,6 +578,7 @@ const BillsPage = {
                 class_id: classIdFromForm(form),
                 job_id: jobIdFromForm(form),
                 ...currencyPayloadFromForm(form),
+                ...taxCode,
                 lines,
             };
             if (id) {

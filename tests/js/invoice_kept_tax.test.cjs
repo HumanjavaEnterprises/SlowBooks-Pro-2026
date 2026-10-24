@@ -46,6 +46,7 @@ function fixture(invoice) {
         $, $$: selector => selector === '#inv-lines tr' ? form.rows : [],
     };
     vm.createContext(context);
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '../../app/static/js/tax_codes.js'), 'utf8'), context);
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../../app/static/js/invoices.js'), 'utf8'), context);
     const page = context.window.InvoicesPage;
     page.loadAttachments = () => {};

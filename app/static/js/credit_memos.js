@@ -101,6 +101,7 @@ const CreditMemosPage = {
         CreditMemosPage._invoices = [];
         CreditMemosPage.lineCount = 1;
         const classGroup = await classFormGroupHtml();
+        await TaxCodes.load();
         // The company's rate, as on a new invoice; picking the invoice being
         // credited switches to that invoice's rate. It defaulted to 0%, so
         // returned taxable goods were credited without their tax (W-L14, F14).
@@ -118,6 +119,7 @@ const CreditMemosPage = {
                         <input name="date" type="date" required value="${todayISO()}"></div>
                     <div class="form-group"><label>For ${T('Invoice')}</label>
                         <select name="original_invoice_id" id="cm-invoice-select" onchange="CreditMemosPage.invoiceSelected(this.value)"><option value="">None</option></select></div>
+                    ${TaxCodes.groupHtml(null, 'CreditMemosPage.recalc()')}
                     <div class="form-group"><label>Tax Rate (%)</label>
                         <input name="tax_rate" type="number" step="0.0001" value="${defaultPct}" oninput="CreditMemosPage.recalc()"></div>
                     ${classGroup}
@@ -191,17 +193,22 @@ const CreditMemosPage = {
     },
 
     // Crediting a particular invoice puts its tax back at the rate it was
-    // charged, as the invoice shows it (8.875, not 8.88).
+    // charged, as the invoice shows it (8.875, not 8.88), and under the tax
+    // code it was charged under, archived or not, so each component comes
+    // back off the account it went to.
     invoiceSelected(invoiceId) {
         const inv = CreditMemosPage._invoices.find(i => String(i.id) === String(invoiceId));
         const rate = $('#cm-form [name="tax_rate"]');
         if (inv && rate) rate.value = +((inv.tax_rate || 0) * 100).toFixed(4);
+        // the invoice's code goes back with it; no invoice, no code carried over
+        TaxCodes.choose($('#cm-form'), inv ? (inv.tax_code_id ?? null) : null, 'CreditMemosPage.recalc()');
         CreditMemosPage.recalc();
     },
 
     recalc() {
         TaxExempt.enforce(CreditMemosPage._customers, $('#cm-customer-select')?.value, $('#cm-lines'));
-        const t = SalesLines.totals($('#cm-lines'), $('#cm-form [name="tax_rate"]')?.value);
+        const rate = $('#cm-form [name="tax_rate"]')?.value;
+        const t = SalesLines.totals($('#cm-lines'), TaxCodes.taxPct($('#cm-form'), rate));
         SalesLines.show(t, ['cm-subtotal', 'cm-tax', 'cm-total']);
         return t;
     },
@@ -225,6 +232,7 @@ const CreditMemosPage = {
             original_invoice_id: form.original_invoice_id.value ? parseInt(form.original_invoice_id.value) : null,
             date: form.date.value,
             tax_rate: (parseFloat(form.tax_rate.value) || 0) / 100,
+            ...TaxCodes.payload(form),
             notes: form.notes.value || null,
             class_id: classIdFromForm(form),
             lines,

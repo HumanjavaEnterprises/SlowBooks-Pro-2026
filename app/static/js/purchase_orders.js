@@ -90,6 +90,7 @@ const PurchaseOrdersPage = {
 
         const jobGroup = await jobFormGroupHtml(po.job_id || null);
         await CostCodes.load();
+        await TaxCodes.load();
         // Inactive vendors stay off the picker, except the one this PO names.
         const vendorOpts = vendors
             .filter(v => v.is_active !== false || v.id == po.vendor_id)
@@ -104,6 +105,7 @@ const PurchaseOrdersPage = {
                         <input name="date" type="date" required value="${po.date}"></div>
                     <div class="form-group"><label>Expected Date</label>
                         <input name="expected_date" type="date" value="${po.expected_date || ''}"></div>
+                    ${TaxCodes.groupHtml(po.tax_code_id, 'PurchaseOrdersPage.recalc()')}
                     <div class="form-group"><label>Tax Rate (%)</label>
                         <input name="tax_rate" type="number" step="0.0001" min="0" value="${+((po.tax_rate || 0) * 100).toFixed(4)}"
                             oninput="PurchaseOrdersPage.recalc()"
@@ -164,7 +166,8 @@ const PurchaseOrdersPage = {
 
     // Line amounts and totals as the server will store them: each line
     // rounded to the cent, tax on the subtotal (it showed $0.00 on every
-    // line and no total at all — F7).
+    // line and no total at all, F7), and a tax code's components each
+    // rounded on their own.
     recalc() {
         let subtotal = 0;
         $$('#po-lines tr').forEach(row => {
@@ -174,7 +177,8 @@ const PurchaseOrdersPage = {
             if (cell) cell.textContent = formatCurrency(amount);
         });
         // to the cent, half up, as the server works it out
-        const tax = SalesLines.tax(subtotal, $('#po-form [name="tax_rate"]')?.value);
+        const rate = $('#po-form [name="tax_rate"]')?.value;
+        const tax = SalesLines.taxOn(subtotal, TaxCodes.taxPct($('#po-form'), rate));
         if ($('#po-subtotal')) $('#po-subtotal').textContent = formatCurrency(subtotal);
         if ($('#po-tax')) $('#po-tax').textContent = formatCurrency(tax);
         if ($('#po-total')) $('#po-total').textContent = formatCurrency(subtotal + tax);
@@ -200,6 +204,7 @@ const PurchaseOrdersPage = {
             date: form.date.value,
             expected_date: form.expected_date.value || null,
             tax_rate: (parseFloat(form.tax_rate.value) || 0) / 100,
+            ...TaxCodes.payload(form),
             notes: form.notes.value || null,
             lines,
         };
@@ -224,6 +229,7 @@ const PurchaseOrdersPage = {
                 // every item, inactive ones too: a line on the order may use one
                 API.get('/items?active_only=false'),
                 API.get('/accounts?active_only=true'),
+                TaxCodes.load(),
             ]);
         } catch (err) { toast(err.message, 'error'); return; }
         const itemById = Object.fromEntries(items.map(i => [i.id, i]));
@@ -243,9 +249,15 @@ const PurchaseOrdersPage = {
             return `<tr><td>${escapeHtml(l.description || (item ? item.name : ''))}</td>
                 <td class="amount">${formatCurrency(l.amount)}</td><td>${cell}</td></tr>`;
         }).join('');
-        const taxNote = Number(po.tax_amount)
-            ? `<p class="form-hint">The ${formatCurrency(po.tax_amount)} of tax on this order is part of what these goods cost: it is added to each line's account, not to Sales Tax Payable.</p>`
-            : '';
+        // A tax code's recoverable components are claimed back, not costed.
+        const code = po.tax_code_id ? TaxCodes.byId(po.tax_code_id) : null;
+        const claimed = code ? code.components.filter(c => c.is_recoverable && c.recoverable_account_id).map(c => c.name) : [];
+        let taxNote = '';
+        if (Number(po.tax_amount) && claimed.length) {
+            taxNote = `<p class="form-hint">Of the ${formatCurrency(po.tax_amount)} of tax on this order (${escapeHtml(code.name)}), the ${escapeHtml(claimed.join(' and '))} is claimed back to its own account; the rest is part of what these goods cost and is added to each line's account.</p>`;
+        } else if (Number(po.tax_amount)) {
+            taxNote = `<p class="form-hint">The ${formatCurrency(po.tax_amount)} of tax on this order is part of what these goods cost: it is added to each line's account, not to Sales Tax Payable.</p>`;
+        }
         openModal(`Turn ${po.po_number} into a bill`, `
             <p style="margin-bottom:8px;">Choose where each line is recorded. The bill is dated ${formatDate(po.date)} and takes ${escapeHtml(vendor.name)}'s terms (${escapeHtml(vendor.terms || 'Net 30')}).</p>
             <div class="table-container"><table>

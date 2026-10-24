@@ -80,6 +80,7 @@ const VendorCreditsPage = {
         VendorCreditsPage._accounts = PurchaseAccounts.filter(accounts);
         VendorCreditsPage.lineCount = 1;
         const classGroup = await classFormGroupHtml();
+        await TaxCodes.load();
 
         const vendOpts = vendors.map(v => `<option value="${v.id}">${escapeHtml(v.name)}</option>`).join('');
 
@@ -93,6 +94,7 @@ const VendorCreditsPage = {
                         <input name="date" type="date" required value="${todayISO()}"></div>
                     <div class="form-group"><label>Their credit note #</label>
                         <input name="ref_number" placeholder="optional"></div>
+                    ${TaxCodes.groupHtml(null, 'VendorCreditsPage.recalc()')}
                     <div class="form-group"><label>Tax Rate (%)</label>
                         <input name="tax_rate" type="number" step="0.0001" min="0" value="0" oninput="VendorCreditsPage.recalc()"></div>
                     ${classGroup}
@@ -153,8 +155,10 @@ const VendorCreditsPage = {
             const cell = row.querySelector('.line-amount');
             if (cell) cell.textContent = formatCurrency(amount);
         });
-        // to the cent, half up, as the server works it out
-        const tax = SalesLines.tax(subtotal, $('#vc-form [name="tax_rate"]')?.value);
+        // to the cent, half up, as the server works it out (a tax code's
+        // components each rounded on their own)
+        const rate = $('#vc-form [name="tax_rate"]')?.value;
+        const tax = SalesLines.taxOn(subtotal, TaxCodes.taxPct($('#vc-form'), rate));
         if ($('#vc-subtotal')) $('#vc-subtotal').textContent = formatCurrency(subtotal);
         if ($('#vc-tax')) $('#vc-tax').textContent = formatCurrency(tax);
         if ($('#vc-total')) $('#vc-total').textContent = formatCurrency(subtotal + tax);
@@ -197,6 +201,7 @@ const VendorCreditsPage = {
                 date: form.date.value,
                 ref_number: form.ref_number.value || null,
                 tax_rate: (parseFloat(form.tax_rate.value) || 0) / 100,
+                ...TaxCodes.payload(form),
                 notes: form.notes.value || null,
                 class_id: classIdFromForm(form),
                 lines,
