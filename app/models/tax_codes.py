@@ -70,6 +70,10 @@ class TaxCodeComponent(Base):
     is_recoverable = Column(Boolean, default=False, nullable=False)
     recoverable_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     sort_order = Column(Integer, default=0, nullable=False)
+    # federal | provincial | None. A customer can be exempt from one level
+    # (a PST-exempt reseller still pays GST); a component with no level is
+    # charged to every taxable customer.
+    level = Column(String(20), nullable=True)
 
     tax_code = relationship("TaxCode", back_populates="components")
     payable_account = relationship("Account", foreign_keys=[payable_account_id])

@@ -195,7 +195,7 @@ def document_tax_lines(doc) -> list[dict]:
 
     from app.models.tax_codes import TaxCode
     from app.services.accounting import _q, taxable_subtotal
-    from app.services.tax_codes import component_amounts
+    from app.services.tax_codes import applicable, component_amounts
 
     code_id = getattr(doc, "tax_code_id", None)
     tax_amount = _q(getattr(doc, "tax_amount", None) or 0)
@@ -203,6 +203,9 @@ def document_tax_lines(doc) -> list[dict]:
         return []
     db = object_session(doc)
     code = db.get(TaxCode, code_id) if db is not None else None
+    # what the customer was charged: a PST-exempt customer's invoice prints
+    # its GST only
+    code = applicable(code, getattr(doc, "exempt_tax_levels", None))
     if code is None or not code.components:
         return []
     amounts = component_amounts(code, taxable_subtotal(doc.lines), tax_amount)

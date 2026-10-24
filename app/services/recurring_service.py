@@ -111,9 +111,12 @@ def generate_due_invoices(
             continue
         # the customer's CURRENT tax treatment, not the template's saved flags
         copied = taxed_copy_lines(rec.lines, rec.customer)
-        subtotal, tax_amount, total = compute_line_totals(
-            copied, tax_rate, tax_code or None
-        )
+        # and the customer's exemptions as they stand today, likewise
+        exempt_levels = tax_codes.exempt_levels_for(rec.customer) if tax_code else None
+        charged = tax_codes.applicable(tax_code or None, exempt_levels)
+        if charged is not None:
+            tax_rate = tax_codes.effective_rate(charged)
+        subtotal, tax_amount, total = compute_line_totals(copied, tax_rate, charged)
         if total <= 0:
             if skipped is not None:
                 who = rec.customer.name if rec.customer else f"schedule {rec.id}"
@@ -172,6 +175,7 @@ def generate_due_invoices(
                 subtotal=subtotal,
                 tax_rate=tax_rate,
                 tax_code_id=tax_code.id if tax_code else None,
+                exempt_tax_levels=exempt_levels,
                 tax_amount=tax_amount,
                 total=total,
                 balance_due=total,
@@ -241,7 +245,7 @@ def generate_due_invoices(
             if tax_code:
                 journal_lines.extend(
                     tax_codes.sales_tax_lines(
-                        db, tax_code, taxable_subtotal(copied), tax_amount
+                        db, charged, taxable_subtotal(copied), tax_amount
                     )
                 )
             elif tax_amount > 0 and tax_account_id:

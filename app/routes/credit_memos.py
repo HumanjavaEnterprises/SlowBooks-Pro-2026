@@ -170,6 +170,16 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
         tax_code_id,
         for_new=original is None or tax_code_id != original.tax_code_id,
     )
+    # The tax goes back at the levels it was charged: the invoice's own
+    # exemptions when the memo takes its code, else the customer's today.
+    if tax_code is None:
+        exempt_levels = None
+    elif original is not None and tax_code.id == original.tax_code_id:
+        exempt_levels = original.exempt_tax_levels
+    else:
+        exempt_levels = tax_codes.exempt_levels_for(customer)
+    tax_code_row = tax_code
+    tax_code = tax_codes.applicable(tax_code, exempt_levels)
     tax_rate = tax_codes.document_rate(tax_code, tax_rate)
 
     # Tax follows the lines the way an invoice's does: an item's own flag,
@@ -191,7 +201,8 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
             original_invoice_id=data.original_invoice_id,
             subtotal=subtotal,
             tax_rate=tax_rate,
-            tax_code_id=tax_code.id if tax_code else None,
+            tax_code_id=tax_code_row.id if tax_code_row else None,
+            exempt_tax_levels=exempt_levels,
             tax_amount=tax_amount,
             total=total,
             balance_remaining=total,

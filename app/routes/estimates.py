@@ -112,8 +112,10 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
     bill_to = _customer_bill_to(customer)
     resolve_line_taxable(db, data.lines, customer)
     tax_code = tax_codes.resolve(db, data.tax_code_id)
-    tax_rate = tax_codes.document_rate(tax_code, data.tax_rate)
-    subtotal, tax_amount, total = compute_line_totals(data.lines, tax_rate, tax_code)
+    exempt_levels = tax_codes.exempt_levels_for(customer) if tax_code else None
+    charged = tax_codes.applicable(tax_code, exempt_levels)
+    tax_rate = tax_codes.document_rate(charged, data.tax_rate)
+    subtotal, tax_amount, total = compute_line_totals(data.lines, tax_rate, charged)
 
     estimate = None
     estimate_number = None
@@ -131,6 +133,7 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
             subtotal=subtotal,
             tax_rate=tax_rate,
             tax_code_id=tax_code.id if tax_code else None,
+            exempt_tax_levels=exempt_levels,
             tax_amount=tax_amount,
             total=total,
             notes=data.notes,
@@ -197,7 +200,12 @@ def update_estimate(
     changes = reject_null_updates(
         Estimate, data.model_dump(exclude_unset=True, exclude={"lines"})
     )
-    tax_code = tax_codes.code_for_edit(db, estimate, changes)
+    tax_code = tax_codes.code_for_edit(
+        db,
+        estimate,
+        changes,
+        db.get(Customer, changes.get("customer_id", estimate.customer_id)),
+    )
     if changes.get("tax_rate") == estimate.tax_rate and "tax_code_id" not in changes:
         changes.pop("tax_rate")  # the code's own rate, unchanged
     if changes.get("customer_id") not in (None, estimate.customer_id):
@@ -344,8 +352,11 @@ def convert_to_invoice(
     # The invoice takes the estimate's tax code, archived or not: it is the
     # sale the customer was quoted, and its code can be changed after.
     tax_code = tax_codes.resolve(db, estimate.tax_code_id, for_new=False)
+    # with the customer's exemptions as they stand today, as its lines
+    exempt_levels = tax_codes.exempt_levels_for(estimate.customer) if tax_code else None
+    tax_code = tax_codes.applicable(tax_code, exempt_levels)
     subtotal, tax_amount, total = compute_line_totals(
-        copied, estimate.tax_rate, tax_code
+        copied, tax_codes.document_rate(tax_code, estimate.tax_rate), tax_code
     )
     confirm_zero_total(
         total,
@@ -400,8 +411,9 @@ def convert_to_invoice(
         due_date=due_date,
         terms=terms,
         subtotal=subtotal,
-        tax_rate=estimate.tax_rate,
+        tax_rate=tax_codes.document_rate(tax_code, estimate.tax_rate),
         tax_code_id=estimate.tax_code_id,
+        exempt_tax_levels=exempt_levels,
         tax_amount=tax_amount,
         total=total,
         balance_due=total,

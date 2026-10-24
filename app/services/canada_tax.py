@@ -241,3 +241,9 @@ def tax_account(db, number: str, name: str):
     db.add(acct)
     db.flush()
     return acct, True
+
+
+def level_of(kind: str) -> str:
+    """GST and HST are federal (HST is filed with GST, on the GST34);
+    QST, PST and RST are the province's."""
+    return "federal" if kind == GST_HST else "provincial"

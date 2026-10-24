@@ -52,6 +52,10 @@ class CustomerCreate(StrictModel):
     credit_limit: CreditLimit = None
     tax_id: Optional[str] = Field(None, max_length=50)
     is_taxable: bool = True
+    # which levels of a tax code they pay (a PST-exempt reseller pays GST)
+    charges_federal_tax: bool = True
+    charges_provincial_tax: bool = True
+    tax_exemption_number: Optional[str] = Field(None, max_length=50)
     notes: Optional[str] = None
     # Nonprofit donor record
     donor_type: Optional[str] = Field(None, max_length=20)
@@ -83,6 +87,9 @@ class CustomerUpdate(StrictModel):
     credit_limit: CreditLimit = None
     tax_id: Optional[str] = Field(None, max_length=50)
     is_taxable: Optional[bool] = None
+    charges_federal_tax: Optional[bool] = None
+    charges_provincial_tax: Optional[bool] = None
+    tax_exemption_number: Optional[str] = Field(None, max_length=50)
     notes: Optional[str] = None
     # Nonprofit donor record
     donor_type: Optional[str] = Field(None, max_length=20)
@@ -116,6 +123,9 @@ class CustomerResponse(BaseModel):
     credit_limit: Optional[Decimal]
     tax_id: Optional[str]
     is_taxable: bool
+    charges_federal_tax: bool = True
+    charges_provincial_tax: bool = True
+    tax_exemption_number: Optional[str] = None
     notes: Optional[str]
     is_active: bool
     balance: Decimal

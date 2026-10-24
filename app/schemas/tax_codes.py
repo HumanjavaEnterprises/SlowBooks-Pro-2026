@@ -1,5 +1,5 @@
 from decimal import Decimal
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -20,6 +20,8 @@ class TaxCodeComponentIn(StrictModel):
     payable_account_id: Optional[int] = None
     is_recoverable: bool = False
     recoverable_account_id: Optional[int] = None
+    # federal | provincial | None: a customer can be exempt from one level
+    level: Optional[Literal["federal", "provincial"]] = None
 
     @field_validator("name")
     @classmethod
@@ -61,6 +63,7 @@ class TaxCodeComponentResponse(BaseModel):
     payable_account_id: Optional[int] = None
     is_recoverable: bool
     recoverable_account_id: Optional[int] = None
+    level: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

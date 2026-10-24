@@ -100,6 +100,7 @@ def _components(db: Session, components) -> list[TaxCodeComponent]:
                 recoverable_account_id=(
                     c.recoverable_account_id if c.is_recoverable else None
                 ),
+                level=c.level,
                 sort_order=i,
             )
         )
@@ -182,6 +183,7 @@ def create_canada_preset(data: CanadaPresetRequest, db: Session = Depends(get_db
                     payable_account_id=account_id,
                     is_recoverable=recoverable,
                     recoverable_account_id=account_id if recoverable else None,
+                    level=canada_tax.level_of(c.kind),
                 )
             )
         code = TaxCode(name=plan.name, description=plan.description)

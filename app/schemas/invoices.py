@@ -179,6 +179,7 @@ class InvoiceResponse(BaseModel):
     subtotal: Decimal
     tax_rate: TaxRateOut
     tax_code_id: Optional[int] = None  # None = the single tax_rate above
+    exempt_tax_levels: Optional[str] = None  # what the customer did not pay
     tax_amount: Decimal
     total: Decimal
     amount_paid: Decimal

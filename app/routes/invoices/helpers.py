@@ -361,7 +361,10 @@ def _post_invoice_journal(
     from app.services import tax_codes
 
     face = document_label(invoice, terms_from_db(db))
-    tax_code = tax_codes.resolve(db, invoice.tax_code_id, for_new=False)
+    tax_code = tax_codes.applicable(
+        tax_codes.resolve(db, invoice.tax_code_id, for_new=False),
+        getattr(invoice, "exempt_tax_levels", None),
+    )
     lines = list(lines)
     journal_lines = _build_invoice_journal_lines(
         db,

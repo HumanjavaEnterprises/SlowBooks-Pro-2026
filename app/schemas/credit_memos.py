@@ -85,6 +85,7 @@ class CreditMemoResponse(BaseModel):
     subtotal: Decimal = Decimal("0")
     tax_rate: TaxRateOut = Decimal("0")
     tax_code_id: Optional[int] = None  # None = the single tax_rate above
+    exempt_tax_levels: Optional[str] = None  # what the customer did not pay
     tax_amount: Decimal = Decimal("0")
     total: Decimal = Decimal("0")
     amount_applied: Decimal = Decimal("0")

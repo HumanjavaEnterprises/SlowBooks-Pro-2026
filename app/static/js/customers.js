@@ -416,6 +416,7 @@ const CustomersPage = {
                     <div class="form-group"><label>Sales Tax</label>
                         <label style="font-weight:normal;"><input type="checkbox" name="tax_exempt" ${c.is_taxable === false ? 'checked' : ''}>
                             Tax exempt: no sales tax on anything sold to them (a reseller, a church, a school)</label></div>
+                    ${CustomersPage.taxLevelsHtml(c)}
                     ${id ? `<div class="form-group"><label>Status</label>
                         <label style="font-weight:normal;"><input type="checkbox" name="is_active" ${c.is_active === false ? '' : 'checked'}>
                             Active (an inactive one is left out of the lists you pick from)</label></div>` : ''}
@@ -439,6 +440,20 @@ const CustomersPage = {
             </form>`);
     },
 
+    // A Canadian company's customer pays GST/HST, PST/QST, or both: a
+    // reseller with a PST exemption certificate pays the GST only. Every
+    // other company's form is as it was.
+    taxLevelsHtml(c) {
+        const s = (typeof App !== 'undefined' && App.settings) || {};
+        if (s.tax_country !== 'CA') return '';
+        return `<div class="form-group"><label>Taxes they pay</label>
+                        <label style="font-weight:normal;"><input type="checkbox" name="charges_federal_tax" ${c.charges_federal_tax === false ? '' : 'checked'}> Federal: GST/HST</label>
+                        <label style="font-weight:normal;"><input type="checkbox" name="charges_provincial_tax" ${c.charges_provincial_tax === false ? '' : 'checked'}> Provincial: PST, RST or QST</label>
+                        <div style="font-size:10px; color:var(--text-muted);">HST is one tax, so an HST province's code is charged in full; a provincial exemption leaves out PST, RST and QST.</div></div>
+                    <div class="form-group"><label>Exemption certificate #</label>
+                        <input name="tax_exemption_number" maxlength="50" value="${escapeHtml(c.tax_exemption_number || '')}" placeholder="e.g. a PST exemption number"></div>`;
+    },
+
     async save(e, id, force) {
         e.preventDefault();
         const form = new FormData(e.target);
@@ -452,6 +467,10 @@ const CustomersPage = {
         // "Active" is on the edit form only.
         delete data.tax_exempt;
         data.is_taxable = !(e.target.tax_exempt && e.target.tax_exempt.checked);
+        // which levels of a tax code they pay (Canadian companies only)
+        if (e.target.charges_federal_tax) data.charges_federal_tax = e.target.charges_federal_tax.checked;
+        if (e.target.charges_provincial_tax) data.charges_provincial_tax = e.target.charges_provincial_tax.checked;
+        if ('tax_exemption_number' in data) data.tax_exemption_number = data.tax_exemption_number.trim() || null;
         if (e.target.is_active) data.is_active = e.target.is_active.checked;
 
         try {

@@ -2622,6 +2622,7 @@ SettingsPage._taxComponentRow = function (c = {}) {
         <td><select class="tc-payable" aria-label="Payable account">${opts(SettingsPage._taxAccounts.payable, c.payable_account_id, 'Sales Tax Payable')}</select></td>
         <td><input class="tc-recoverable" type="checkbox" aria-label="Recoverable" ${c.is_recoverable ? 'checked' : ''}></td>
         <td><select class="tc-recoverable-account" aria-label="Recoverable account">${opts(SettingsPage._taxAccounts.recoverable, c.recoverable_account_id, 'None')}</select></td>
+        <td><select class="tc-level" aria-label="Level"><option value="">Any</option>${['federal', 'provincial'].map(l => `<option value="${l}" ${c.level === l ? 'selected' : ''}>${l === 'federal' ? 'Federal' : 'Provincial'}</option>`).join('')}</select></td>
         <td><button type="button" class="btn btn-sm btn-secondary" onclick="this.closest('tr').remove()" aria-label="Remove component">&times;</button></td>
     </tr>`;
 };
@@ -2648,7 +2649,8 @@ SettingsPage.editTaxCode = async function (id) {
             ${fixed ? '<div class="hint" style="margin:8px 0;">This code is on documents already, so its rates and accounts stay as they are. For a new rate, add a new tax code and archive this one.</div>' : ''}
             <table class="line-items-table" style="margin-top:8px;">
                 <thead><tr><th scope="col">Component</th><th scope="col">Rate (%)</th><th scope="col">Payable account</th>
-                    <th scope="col" title="Tax paid on purchases is claimed back">Recoverable</th><th scope="col">Recoverable account</th><th scope="col"></th></tr></thead>
+                    <th scope="col" title="Tax paid on purchases is claimed back">Recoverable</th><th scope="col">Recoverable account</th>
+                    <th scope="col" title="A customer can be exempt from the federal or the provincial tax">Level</th><th scope="col"></th></tr></thead>
                 <tbody id="tax-components"${fixed ? ' inert' : ''}>${code.components.map(c => SettingsPage._taxComponentRow(c)).join('')}</tbody>
             </table>
             ${fixed ? '' : `<button type="button" class="btn btn-sm btn-secondary" style="margin-top:8px;" onclick="document.getElementById('tax-components').insertAdjacentHTML('beforeend', SettingsPage._taxComponentRow())">+ Add Component</button>`}
@@ -2672,6 +2674,7 @@ SettingsPage.saveTaxCode = async function (e, id) {
             payable_account_id: parseInt(r.querySelector('.tc-payable').value) || null,
             is_recoverable: r.querySelector('.tc-recoverable').checked,
             recoverable_account_id: parseInt(r.querySelector('.tc-recoverable-account').value) || null,
+            level: (r.querySelector('.tc-level') || {}).value || null,
         }));
     }
     try {

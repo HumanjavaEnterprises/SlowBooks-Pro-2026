@@ -533,8 +533,14 @@ def duplicate_invoice(
     # The copy keeps the original's tax code, archived or not: it is the
     # same document again, and the copy's code can be changed like any other.
     tax_code = tax_codes.resolve(db, original.tax_code_id, for_new=False)
+    # and the customer's exemptions as they stand today, as its lines take
+    # the customer's tax treatment today (taxed_copy_lines)
+    exempt_levels = tax_codes.exempt_levels_for(original.customer) if tax_code else None
+    tax_code = tax_codes.applicable(tax_code, exempt_levels)
     subtotal, tax_amount, total = compute_line_totals(
-        copied, original.tax_rate, tax_code
+        copied,
+        tax_codes.document_rate(tax_code, original.tax_rate),
+        tax_code,
     )
     noun = document_label(original, words).lower()
     confirm_zero_total(
@@ -565,8 +571,9 @@ def duplicate_invoice(
         ship_state=original.ship_state,
         ship_zip=original.ship_zip,
         subtotal=subtotal,
-        tax_rate=original.tax_rate,
+        tax_rate=tax_codes.document_rate(tax_code, original.tax_rate),
         tax_code_id=original.tax_code_id,
+        exempt_tax_levels=exempt_levels,
         tax_amount=tax_amount,
         total=total,
         balance_due=total,

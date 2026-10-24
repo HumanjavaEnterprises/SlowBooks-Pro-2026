@@ -50,6 +50,12 @@ class Customer(Base):
     credit_limit = Column(Numeric(15, 2), nullable=True)
     tax_id = Column(String(50), nullable=True)
     is_taxable = Column(Boolean, default=True)
+    # Which levels of a tax code the customer pays: a reseller with a PST
+    # exemption certificate pays GST but not PST. is_taxable False is still
+    # "no tax on anything".
+    charges_federal_tax = Column(Boolean, default=True, nullable=False)
+    charges_provincial_tax = Column(Boolean, default=True, nullable=False)
+    tax_exemption_number = Column(String(50), nullable=True)
     notes = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
     balance = Column(Numeric(15, 2), default=0)

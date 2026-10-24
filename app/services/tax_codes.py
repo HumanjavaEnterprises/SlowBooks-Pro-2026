@@ -89,7 +89,7 @@ def component_amounts(
     return list(zip(comps, amounts))
 
 
-def code_for_edit(db: Session, doc, update_data: dict) -> TaxCode | None:
+def code_for_edit(db: Session, doc, update_data: dict, customer=None):
     """The code a document has after an edit, with update_data's tax_rate
     set to that code's rate. Sending tax_code_id changes it (null clears it,
     and the document keeps the rate it is sent or the one it had); leaving
@@ -100,6 +100,17 @@ def code_for_edit(db: Session, doc, update_data: dict) -> TaxCode | None:
         code = resolve(db, new_id, for_new=new_id != doc.tax_code_id)
     else:
         code = resolve(db, doc.tax_code_id, for_new=False)
+    # A sales document keeps the levels its customer was exempt from; a new
+    # customer, or a new code, takes the customer's as they stand now.
+    if hasattr(doc, "exempt_tax_levels"):
+        moved = update_data.get("customer_id", doc.customer_id) != doc.customer_id
+        if moved or "tax_code_id" in update_data:
+            levels = exempt_levels_for(customer) if code is not None else None
+        else:
+            levels = doc.exempt_tax_levels
+        if levels != doc.exempt_tax_levels:
+            update_data["exempt_tax_levels"] = levels
+        code = applicable(code, levels)
     if code is not None:
         update_data["tax_rate"] = effective_rate(code)
     return code
@@ -375,3 +386,42 @@ def inclusive_purchase_split(code: TaxCode, total, tax_amount=None):
     recoverable, _rest = purchase_tax_split(code, total - tax, tax)
     claimed = sum((amount for _, amount in recoverable), Decimal("0"))
     return tax, recoverable, _q(total - claimed)
+
+
+# ── Levels: which parts of a code a customer pays ───────────────────────
+
+LEVELS = ("federal", "provincial")
+
+
+def exempt_levels_for(customer) -> str | None:
+    """The levels a customer is exempt from, as a document stores them:
+    "provincial", "federal", "federal,provincial", or None for none."""
+    if customer is None:
+        return None
+    exempt = [
+        level
+        for level, pays in (
+            ("federal", getattr(customer, "charges_federal_tax", True)),
+            ("provincial", getattr(customer, "charges_provincial_tax", True)),
+        )
+        if pays is False
+    ]
+    return ",".join(exempt) or None
+
+
+def applicable(code: TaxCode | None, exempt_levels):
+    """The code as a document charges it: without the components at a level
+    its customer is exempt from. The same code when nothing is exempt, so
+    every caller can pass what it has. The result reads like a TaxCode
+    (id, name, components) for the arithmetic and the postings."""
+    if code is None or not exempt_levels:
+        return code
+    skip = {level.strip() for level in str(exempt_levels).split(",") if level}
+    kept = [c for c in code.components if (c.level or None) not in skip]
+    if len(kept) == len(code.components):
+        return code
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        id=code.id, name=code.name, is_archived=code.is_archived, components=kept
+    )

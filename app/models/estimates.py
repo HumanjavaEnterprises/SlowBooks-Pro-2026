@@ -54,6 +54,9 @@ class Estimate(Base):
     tax_rate = Column(Numeric(7, 6), default=0)  # a fraction: 8.875% is 0.08875
     # None = the single rate above, posted to Sales Tax Payable
     tax_code_id = Column(Integer, ForeignKey("tax_codes.id"), nullable=True)
+    # The tax-code levels the customer was exempt from when this was saved
+    # ("provincial", "federal", or both, comma-separated); None for none
+    exempt_tax_levels = Column(String(30), nullable=True)
     tax_amount = Column(Numeric(15, 2), default=0)
     total = Column(Numeric(15, 2), default=0)
 
