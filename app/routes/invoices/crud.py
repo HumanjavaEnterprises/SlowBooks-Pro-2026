@@ -377,7 +377,13 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
         subtotal, tax_amount, total = _compute_totals(
             effective_lines, tax_rate, tax_code
         )
-        kept = kept_tax(invoice, tax_rate, effective_lines)
+        # an import's kept tax stands only while the invoice has no code: a
+        # code (even a 0% one) says what the tax is
+        kept = (
+            None
+            if tax_code is not None
+            else kept_tax(invoice, tax_rate, effective_lines)
+        )
         if kept is not None:
             tax_amount, total = kept, _q(subtotal + kept)
         confirm_zero_total(

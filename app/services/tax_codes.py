@@ -84,7 +84,14 @@ def component_amounts(
     base = Decimal(str(taxable_base or 0))
     comps = list(code.components)
     amounts = [_q(base * Decimal(str(c.rate or 0))) for c in comps]
-    if tax_amount is not None and sum(amounts, Decimal("0")) != _q(tax_amount):
+    rates = sum((Decimal(str(c.rate or 0)) for c in comps), Decimal("0"))
+    # a stored amount is shared by rate; codes at 0% (Zero-rated, Exempt)
+    # have no rate to share it by, and charge nothing
+    if (
+        tax_amount is not None
+        and rates
+        and sum(amounts, Decimal("0")) != _q(tax_amount)
+    ):
         amounts = spread(tax_amount, [Decimal(str(c.rate or 0)) for c in comps])
     return list(zip(comps, amounts))
 
@@ -241,21 +248,41 @@ def component_totals(db: Session, start_date, end_date) -> list[dict]:
     Told apart by the posting's source, not its side or account, so one
     account can hold both (a GST/HST account with its input tax credits).
     Voids are postings too and net out on their own."""
-    from sqlalchemy import func as sqlfunc
+    from sqlalchemy import and_, func as sqlfunc, or_
+    from sqlalchemy.orm import aliased, joinedload
 
     from app.models.transactions import Transaction, TransactionLine
 
+    # A document's posting voided from the Journal is a "manual_void" whose
+    # source is the posting it reverses: it counts on that posting's side,
+    # so a voided bill takes back an ITC rather than adding collected tax.
+    original = aliased(Transaction)
+    is_purchase = or_(
+        Transaction.source_type.in_(PURCHASE_SOURCES),
+        and_(
+            Transaction.source_type == "manual_void",
+            original.source_type.in_(PURCHASE_SOURCES),
+        ),
+    )
     rows = (
         db.query(
             TaxCodeComponent,
-            Transaction.source_type.in_(PURCHASE_SOURCES),
+            is_purchase,
             sqlfunc.coalesce(sqlfunc.sum(TransactionLine.debit), 0),
             sqlfunc.coalesce(sqlfunc.sum(TransactionLine.credit), 0),
         )
         .join(TransactionLine, TransactionLine.tax_component_id == TaxCodeComponent.id)
         .join(Transaction, TransactionLine.transaction_id == Transaction.id)
+        .outerjoin(
+            original,
+            and_(
+                Transaction.source_type == "manual_void",
+                original.id == Transaction.source_id,
+            ),
+        )
+        .options(joinedload(TaxCodeComponent.tax_code))
         .filter(Transaction.date >= start_date, Transaction.date <= end_date)
-        .group_by(TaxCodeComponent.id, Transaction.source_type.in_(PURCHASE_SOURCES))
+        .group_by(TaxCodeComponent.id, is_purchase)
         .all()
     )
     totals: dict[int, dict] = {}
@@ -425,3 +452,19 @@ def applicable(code: TaxCode | None, exempt_levels):
     return SimpleNamespace(
         id=code.id, name=code.name, is_archived=code.is_archived, components=kept
     )
+
+
+def codes_in_use(db: Session) -> set[int]:
+    """The ids of every code some document names, one query per table."""
+    import importlib
+
+    used: set[int] = set()
+    for module, name in DOCUMENT_MODELS:
+        model = getattr(importlib.import_module(module), name)
+        used.update(
+            code_id
+            for (code_id,) in db.query(model.tax_code_id)
+            .filter(model.tax_code_id.isnot(None))
+            .distinct()
+        )
+    return used

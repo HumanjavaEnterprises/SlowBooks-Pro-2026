@@ -11,7 +11,7 @@
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
 from app.models.accounts import Account, AccountType
@@ -41,10 +41,10 @@ def _code_or_404(db: Session, code_id: int) -> TaxCode:
     return code
 
 
-def _response(db: Session, code: TaxCode) -> TaxCodeResponse:
+def _response(db: Session, code: TaxCode, used: set | None = None) -> TaxCodeResponse:
     resp = TaxCodeResponse.model_validate(code)
     resp.rate = tax_codes.effective_rate(code)
-    resp.in_use = tax_codes.in_use(db, code)
+    resp.in_use = code.id in used if used is not None else tax_codes.in_use(db, code)
     return resp
 
 
@@ -219,7 +219,11 @@ def list_tax_codes(include_archived: bool = False, db: Session = Depends(get_db)
     q = db.query(TaxCode)
     if not include_archived:
         q = q.filter(TaxCode.is_archived.is_(False))
-    return [_response(db, c) for c in q.order_by(TaxCode.name).all()]
+    # every form loads this list: which codes are in use is asked once per
+    # document table, not once per code
+    used = tax_codes.codes_in_use(db)
+    codes = q.options(selectinload(TaxCode.components)).order_by(TaxCode.name).all()
+    return [_response(db, c, used) for c in codes]
 
 
 @router.get("/{code_id}", response_model=TaxCodeResponse)
