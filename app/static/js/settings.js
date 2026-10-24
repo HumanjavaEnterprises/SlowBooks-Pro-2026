@@ -1244,7 +1244,11 @@ const SettingsPage = {
             // the presets name the province just saved, not the one the
             // page opened with (a button saying Ontario set up Quebec)
             const presets = document.getElementById('tax-presets');
-            if (presets && saved) presets.innerHTML = SettingsPage._canadaPresets(saved);
+            if (saved && typeof App !== 'undefined') App.settings = { ...(App.settings || {}), ...saved };
+            if (presets && saved) {
+                presets.innerHTML = SettingsPage._canadaPresets(saved);
+                SettingsPage.loadTaxCodes();
+            }
             // the shell's copy too: a new company name shows in the status
             // bar, the title and the topbar now, not at the next start
             if (saved && typeof App !== 'undefined' && typeof App.showCompany === 'function') {
@@ -2577,6 +2581,12 @@ SettingsPage.loadTaxCodes = async function () {
     if (!el) return;
     try {
         const codes = await API.get('/tax-codes?include_archived=true');
+        const pick = document.getElementById('default-tax-code');
+        if (pick) {
+            const want = pick.dataset.value || '';
+            pick.innerHTML = '<option value="">None (the rate typed)</option>' + codes.filter(c => !c.is_archived).map(c =>
+                `<option value="${c.id}" ${String(c.id) === want ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
+        }
         if (!codes.length) {
             el.innerHTML = '<div class="hint">No tax codes yet. Documents use the one Tax Rate they are given.</div>';
             return;
@@ -2723,6 +2733,7 @@ SettingsPage._canadaSection = function (s) {
                                 title="10 digits, TQ and 4 digits; Quebec registrants only"
                                 value="${escapeHtml(s.qst_registration_number || '')}"></div>
                     </div>
+                    ${(s.gst_hst_registration_number || '').trim() ? '' : `<div class="hint" role="status" style="margin-top:6px; color:var(--danger);">${Terms.text('No GST/HST registration number yet. Invoices of $100 or more must show it for the customer to claim the tax back; it prints on sales documents once it is here.')}</div>`}
                     <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">The province is where the company collects sales tax; its codes are set up under Tax Codes. The QST number is for a company registered with Revenu Québec.</div>
                 </div>`;
 };
@@ -2736,7 +2747,10 @@ SettingsPage._canadaPresets = function (s) {
     const ns = s.tax_province === 'NS' ? `
             <button type="button" class="btn btn-secondary" onclick="SettingsPage.setupCanadaTaxCodes(true)">Also add the 15% HST code for documents dated before 2025-04-01</button>
             <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Nova Scotia's HST is 14% from 2025-04-01 and was 15% before. A tax code has one rate, so documents dated before 2025-04-01 need the 15% code.</div>` : '';
-    return `<div style="margin-bottom:12px;" data-admin data-write>
+    return `<div class="form-group" style="max-width:360px; margin-bottom:12px;"><label for="default-tax-code">New documents start on</label>
+            <select name="default_tax_code_id" id="default-tax-code" data-value="${escapeHtml(s.default_tax_code_id || '')}"><option value="">None (the rate typed)</option></select>
+            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">A sale taxed on a typed rate instead of a code is not on the GST/HST return. Saved with Save Settings.</div></div>
+        <div style="margin-bottom:12px;" data-admin data-write>
             <button type="button" class="btn btn-secondary" onclick="SettingsPage.setupCanadaTaxCodes(false)">Set up ${escapeHtml(name)} sales tax codes</button>${ns}
             <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Adds the province's codes, GST alone where a provincial tax sits beside it, Zero-rated and Exempt, and the GST/HST, QST or PST payable accounts they post to. Codes and accounts already here are left as they are.</div>
             <div id="tax-presets-result" class="hint" role="status" style="margin-top:8px;" hidden></div>
@@ -2797,6 +2811,14 @@ SettingsPage.setupCanadaTaxCodes = async function (before20250401) {
         parts.push(`Rates as checked on ${escapeHtml(r.rates_verified)}.`);
         if (el) { el.innerHTML = parts.join(' '); el.hidden = false; }
         toast(r.created.tax_codes.length ? 'Sales tax codes set up' : 'Nothing new to set up');
+        // the preset may have chosen the default code; the forms read it
+        // from the shell's copy of the settings
+        try {
+            const fresh = await API.get('/settings');
+            if (typeof App !== 'undefined') App.settings = fresh;
+            const sel = document.getElementById('default-tax-code');
+            if (sel) sel.dataset.value = fresh.default_tax_code_id || '';
+        } catch (e) { /* the list below still reloads */ }
         SettingsPage.loadTaxCodes();
     } catch (err) { toast(err.message, 'error'); }
     finally { buttons.forEach(b => { b.disabled = false; }); }

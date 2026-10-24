@@ -247,6 +247,7 @@ CANADA_SETTINGS_KEYS = (
     "tax_province",
     "gst_hst_registration_number",
     "qst_registration_number",
+    "default_tax_code_id",
 )
 
 

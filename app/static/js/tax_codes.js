@@ -53,6 +53,16 @@ const TaxCodes = {
             </select></div>`;
     },
 
+    // The code a NEW document starts on: the company's default (a Canadian
+    // company's province code, set by its preset), or none. A Canadian sale
+    // saved on a typed rate is tax the GST/HST return cannot see.
+    forNew() {
+        const s = (typeof App !== 'undefined' && App.settings) || {};
+        if (s.tax_country !== 'CA' || !s.default_tax_code_id) return null;
+        const code = TaxCodes.byId(s.default_tax_code_id);
+        return code && !code.is_archived ? code.id : null;
+    },
+
     _optionHtml(code, selected) {
         return `<option value="${code.id}" ${selected ? 'selected' : ''}>${escapeHtml(TaxCodes.label(code))}</option>`;
     },

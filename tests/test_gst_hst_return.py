@@ -493,3 +493,30 @@ def test_quebec_is_known_from_the_tax_province(client, db_session, canada):
     data, _ = _report(client)
     assert data["files_with_revenu_quebec"] is True
     assert any("FPZ-500" in n for n in data["notes"])
+
+
+def test_tax_charged_without_a_code_is_named_on_the_return(
+    client, db_session, canada, accounts, seed_customer
+):
+    """The QA case: an Ontario company's invoice saved on a typed 13% posts
+    to Sales Tax Payable with no component. It cannot be on line 103, so the
+    return says so instead of agreeing with itself."""
+    code = _code(
+        client,
+        "HST ON",
+        {
+            "name": "HST",
+            "rate": 0.13,
+            "payable_account_id": accounts["2210"].id,
+            "is_recoverable": True,
+            "recoverable_account_id": accounts["2210"].id,
+        },
+    )
+    _invoice(client, seed_customer.id, 200, tax_code_id=code["id"])  # 26.00 coded
+    _invoice(client, seed_customer.id, 10, tax_rate=0.13)  # 1.30 typed
+    data, lines = _report(client)
+    assert lines["103"] == 26.00
+    ledger = data["ledger"]
+    assert ledger["uncoded_tax"] == 1.30
+    assert [a["account_number"] for a in ledger["uncoded_accounts"]] == ["2200"]
+    assert "1.30 of sales tax was charged on a typed rate" in data["notes"][0]

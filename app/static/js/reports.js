@@ -1337,6 +1337,7 @@ const ReportsPage = {
                 : '';
             return `${ReportsPage._exportButtons('gst-hst-return', qs)}
                 <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}</p>
+                ${data.ledger && data.ledger.uncoded_tax ? `<div class="hint hint--locked" role="alert" style="margin-bottom:8px; color:var(--danger);">${escapeHtml(data.notes[0])}</div>` : ''}
                 <div class="table-container"><table>
                     <thead><tr><th scope="col">Line</th><th scope="col">Description</th><th scope="col" class="amount">Amount</th></tr></thead>
                     <tbody>${lines}</tbody>
@@ -1344,6 +1345,7 @@ const ReportsPage = {
                 <div style="font-size:11px; color:var(--gray-500); margin-top:4px; display:grid; gap:4px;">
                     <div>Lines 104, 107, 110 and 111 are amounts the books do not hold (adjustments, instalments paid, rebates claimed). They are 0 until you type them in, and the totals follow.</div>
                     <div>Lines 113B and 113C add GST/HST you self-assess (lines 205 and 405), which these books do not track; any you have changes the refund or the amount owing. The CRA does not pay a refund of $2 or less.</div>
+                    <div>Amounts are shown to the cent; the CRA's line 101 takes whole dollars.</div>
                     ${quebec}
                 </div>
                 <h4 style="margin:14px 0 4px; font-size:12px;">GST and HST by tax code</h4>

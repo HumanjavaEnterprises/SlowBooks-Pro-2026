@@ -158,7 +158,7 @@ def gst_hst_return(db: Session, start_date, end_date, entered=None) -> dict:
             "net": float(collected - refunds),
         }
 
-    return {
+    result = {
         "start_date": start_date.isoformat(),
         "end_date": end_date.isoformat(),
         "lines": lines,
@@ -170,6 +170,19 @@ def gst_hst_return(db: Session, start_date, end_date, entered=None) -> dict:
             db, start_date, end_date, amounts["103"] - amounts["106"]
         ),
     }
+    ledger = result["ledger"]
+    if ledger and ledger.get("uncoded_tax"):
+        where = ", ".join(
+            f"{a['account_number'] or ''} {a['name']}".strip()
+            for a in ledger["uncoded_accounts"]
+        )
+        result["notes"].insert(
+            0,
+            f"{ledger['uncoded_tax']:.2f} of sales tax was charged on a typed rate, "
+            f"with no tax code, and posted to {where}. It is not on lines 103 or "
+            "106: give those documents a tax code before filing.",
+        )
+    return result
 
 
 def _notes(quebec: bool) -> list[str]:
@@ -264,6 +277,20 @@ def _gst_hst_ledger(db: Session, start_date, end_date, net_tax: Decimal):
         }
     )
     payable = set(tax_codes.tax_accounts(db))
+    # Sales tax charged with no tax code (a rate typed on the document) on
+    # a tax account outside these: it cannot be on lines 103 or 106, and the
+    # check above cannot see it, so it is counted and named on its own.
+    elsewhere = [i for i in payable if i not in account_ids]
+    uncoded = (
+        owed(
+            *in_period,
+            not_payment,
+            TransactionLine.tax_component_id.is_(None),
+            account_ids=elsewhere,
+        )
+        if elsewhere
+        else Decimal("0.00")
+    )
     end = Transaction.date <= end_date
     accounts = []
     for account_id in account_ids:
@@ -288,6 +315,16 @@ def _gst_hst_ledger(db: Session, start_date, end_date, net_tax: Decimal):
         "payments": float(-owed(*in_period, payment)),
         "balance": float(owed(end)),
         "difference": float(_q(net_tax - posted)),
+        "uncoded_tax": float(uncoded),
+        "uncoded_accounts": (
+            [
+                {"account_number": a.account_number, "name": a.name}
+                for a in (db.get(Account, i) for i in elsewhere)
+                if a is not None
+            ]
+            if uncoded
+            else []
+        ),
     }
 
 

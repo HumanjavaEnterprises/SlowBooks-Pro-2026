@@ -171,7 +171,7 @@ const EstimatesPage = {
                         <input name="date" type="date" required value="${est.date}"></div>
                     <div class="form-group"><label>Expiration Date</label>
                         <input name="expiration_date" type="date" value="${est.expiration_date || ''}"></div>
-                    ${TaxCodes.groupHtml(est.tax_code_id, 'EstimatesPage.recalc()')}
+                    ${TaxCodes.groupHtml(id ? est.tax_code_id : TaxCodes.forNew(), 'EstimatesPage.recalc()')}
                     <div class="form-group"><label>Tax Rate (%)</label>
                         <input name="tax_rate" type="number" step="0.0001" value="${+((est.tax_rate || 0) * 100).toFixed(4)}"
                             oninput="EstimatesPage.recalc()"></div>

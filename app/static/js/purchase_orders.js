@@ -105,7 +105,7 @@ const PurchaseOrdersPage = {
                         <input name="date" type="date" required value="${po.date}"></div>
                     <div class="form-group"><label>Expected Date</label>
                         <input name="expected_date" type="date" value="${po.expected_date || ''}"></div>
-                    ${TaxCodes.groupHtml(po.tax_code_id, 'PurchaseOrdersPage.recalc()')}
+                    ${TaxCodes.groupHtml(id ? po.tax_code_id : TaxCodes.forNew(), 'PurchaseOrdersPage.recalc()')}
                     <div class="form-group"><label>Tax Rate (%)</label>
                         <input name="tax_rate" type="number" step="0.0001" min="0" value="${+((po.tax_rate || 0) * 100).toFixed(4)}"
                             oninput="PurchaseOrdersPage.recalc()"

@@ -119,7 +119,7 @@ const CreditMemosPage = {
                         <input name="date" type="date" required value="${todayISO()}"></div>
                     <div class="form-group"><label>For ${T('Invoice')}</label>
                         <select name="original_invoice_id" id="cm-invoice-select" onchange="CreditMemosPage.invoiceSelected(this.value)"><option value="">None</option></select></div>
-                    ${TaxCodes.groupHtml(null, 'CreditMemosPage.recalc()')}
+                    ${TaxCodes.groupHtml(TaxCodes.forNew(), 'CreditMemosPage.recalc()')}
                     <div class="form-group"><label>Tax Rate (%)</label>
                         <input name="tax_rate" type="number" step="0.0001" value="${defaultPct}" oninput="CreditMemosPage.recalc()"></div>
                     ${classGroup}

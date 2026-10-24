@@ -28,6 +28,7 @@ CANADA_KEYS = (
     "tax_province",
     "gst_hst_registration_number",
     "qst_registration_number",
+    "default_tax_code_id",
 )
 PRESET = "/api/tax-codes/presets/canada"
 DAY = "2026-07-02"
@@ -326,7 +327,8 @@ def test_a_gst_only_territory_gets_gst_and_nothing_provincial(
         "Exempt",
     ]
     assert [a["account_number"] for a in out["created"]["accounts"]] == ["2250"]
-    assert out["notes"] == []
+    # nothing to note but the default it set
+    assert out["notes"] == ["New documents now start on 'GST 5%'."]
     (gst,) = _codes(client)["GST 5%"]["components"]
     assert (gst["name"], Decimal(gst["rate"])) == ("GST", Decimal("0.05"))
     assert _codes(client)["Zero-rated"]["components"][0]["name"] == "GST"
@@ -570,3 +572,35 @@ def test_the_presets_follow_the_province_saved_and_take_one_click_at_a_time():
     src = (ROOT / "app/static/js/settings.js").read_text(encoding="utf-8")
     assert "presets.innerHTML = SettingsPage._canadaPresets(saved)" in src
     assert "b.disabled = true" in src and "finally { buttons.forEach" in src
+
+
+def test_the_preset_makes_its_province_code_the_default(client, seed_accounts):
+    _canadian(client, "ON")
+    out = _preset(client, "ON")
+    code = _codes(client)["HST ON 13%"]
+    assert client.get("/api/settings").json()["default_tax_code_id"] == str(code["id"])
+    assert any("start on 'HST ON 13%'" in n for n in out["notes"])
+    # a default already chosen is left as it is
+    gst = _codes(client)["Zero-rated"]
+    r = client.put("/api/settings", json={"default_tax_code_id": str(gst["id"])})
+    assert r.status_code == 200, r.text
+    _preset(client, "ON")
+    assert client.get("/api/settings").json()["default_tax_code_id"] == str(gst["id"])
+
+
+def test_the_default_tax_code_must_be_a_current_one(client, seed_accounts):
+    _canadian(client, "ON")
+    r = client.put("/api/settings", json={"default_tax_code_id": "999"})
+    assert r.status_code == 422 and "current tax codes" in r.json()["detail"]
+    assert (
+        client.put("/api/settings", json={"default_tax_code_id": ""}).status_code == 200
+    )
+
+
+def test_a_us_company_never_sees_the_default_tax_code(client):
+    assert "default_tax_code_id" not in client.get("/api/settings").json()
+
+
+def test_a_blank_gst_hst_number_is_pointed_out():
+    src = (ROOT / "app/static/js/settings.js").read_text(encoding="utf-8")
+    assert "No GST/HST registration number yet." in src

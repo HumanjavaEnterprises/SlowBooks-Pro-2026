@@ -94,7 +94,7 @@ const VendorCreditsPage = {
                         <input name="date" type="date" required value="${todayISO()}"></div>
                     <div class="form-group"><label>Their credit note #</label>
                         <input name="ref_number" placeholder="optional"></div>
-                    ${TaxCodes.groupHtml(null, 'VendorCreditsPage.recalc()')}
+                    ${TaxCodes.groupHtml(TaxCodes.forNew(), 'VendorCreditsPage.recalc()')}
                     <div class="form-group"><label>Tax Rate (%)</label>
                         <input name="tax_rate" type="number" step="0.0001" min="0" value="0" oninput="VendorCreditsPage.recalc()"></div>
                     ${classGroup}

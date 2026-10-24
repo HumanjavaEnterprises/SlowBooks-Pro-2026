@@ -248,7 +248,7 @@ const BillsPage = {
         BillsPage._taxRate = bill && !ownCode ? Number(bill.tax_rate) || 0 : 0;
         // A bill has no rate to type: without a code it keeps the rate it has.
         const ownPct = Number((BillsPage._taxRate * 100).toFixed(4));
-        const codeGroup = TaxCodes.groupHtml(bill ? bill.tax_code_id : null, 'BillsPage.recalc()',
+        const codeGroup = TaxCodes.groupHtml(bill ? bill.tax_code_id : TaxCodes.forNew(), 'BillsPage.recalc()',
             BillsPage._taxRate ? `None (this bill's ${ownPct}%)` : 'None');
         const taxRows = !!(BillsPage._taxRate || codeGroup);
 

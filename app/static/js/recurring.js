@@ -91,7 +91,7 @@ const RecurringPage = {
                             ${['Net 15','Net 30','Net 45','Net 60','Due on Receipt'].map(t =>
                                 `<option value="${t}" ${rec.terms===t?'selected':''}>${t}</option>`).join('')}
                         </select></div>
-                    ${TaxCodes.groupHtml(rec.tax_code_id, 'RecurringPage.recalc()')}
+                    ${TaxCodes.groupHtml(id ? rec.tax_code_id : TaxCodes.forNew(), 'RecurringPage.recalc()')}
                     <div class="form-group"><label>Tax Rate (%)</label>
                         <input name="tax_rate" type="number" step="0.0001" value="${+((rec.tax_rate || 0) * 100).toFixed(4)}" oninput="RecurringPage.recalc()"></div>
                     ${classGroup}

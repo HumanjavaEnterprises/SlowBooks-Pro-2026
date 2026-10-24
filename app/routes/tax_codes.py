@@ -189,6 +189,17 @@ def create_canada_preset(data: CanadaPresetRequest, db: Session = Depends(get_db
         db.add(code)
         db.flush()
         new_codes.append(code)
+    # New documents start on the province's own code, so a sale is never
+    # taxed on a typed rate the GST/HST return cannot see. One already
+    # chosen is left as it is.
+    from app.services.settings_service import get_setting_raw, set_setting
+
+    if not (get_setting_raw(db, "default_tax_code_id") or "").strip():
+        first = canada_tax.code_plans(province, before_2025_04_01=before)[0]
+        main = db.query(TaxCode).filter(TaxCode.name == first.name).first()
+        if main is not None:
+            set_setting(db, "default_tax_code_id", str(main.id))
+            notes.append(f"New documents now start on '{main.name}'.")
     db.commit()
     created["tax_codes"] = [_response(db, c) for c in new_codes]
     return {

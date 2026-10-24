@@ -678,7 +678,7 @@ const InvoicesPage = {
                         <input name="po_number" value="${escapeHtml(inv.po_number || '')}"></div>
                     ${classGroup}${jobGroup}${pledgeGroup}
                     ${currencyFormGroupsHtml(inv.currency, inv.exchange_rate)}
-                    ${TaxCodes.groupHtml(inv.tax_code_id, 'InvoicesPage.recalc()')}
+                    ${TaxCodes.groupHtml(id ? inv.tax_code_id : TaxCodes.forNew(), 'InvoicesPage.recalc()')}
                     <div class="form-group"><label>Tax Rate (%)</label>
                         <input name="tax_rate" type="number" step="0.0001" value="${+((inv.tax_rate || 0) * 100).toFixed(4)}"
                             oninput="InvoicesPage.recalc()">

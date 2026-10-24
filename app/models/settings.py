@@ -39,6 +39,9 @@ DEFAULT_SETTINGS = {
     "tax_province": "",  # two letters: ON, QC, BC ...
     "gst_hst_registration_number": "",  # 123456789RT0001
     "qst_registration_number": "",  # 1234567890TQ0001
+    # The tax code a new sales or purchase document starts on (Canada): a
+    # sale saved on a typed rate is tax the GST/HST return cannot see.
+    "default_tax_code_id": "",
     "company_name": "My Company",
     "company_address1": "",
     "company_address2": "",

@@ -70,6 +70,22 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 
+def _check_default_tax_code(db: Session, cleaned: dict) -> None:
+    """The default tax code is a current code, or blank for none."""
+    value = cleaned.get("default_tax_code_id")
+    if not value:
+        return
+    from app.models.tax_codes import TaxCode
+
+    code = db.get(TaxCode, int(value)) if value.isdigit() else None
+    if code is None or code.is_archived:
+        raise HTTPException(
+            status_code=422,
+            detail="The default tax code must be one of the current tax codes. "
+            "Nothing was saved.",
+        )
+
+
 def _guard_tax_country(db: Session, cleaned: dict) -> None:
     """The sales tax country is chosen once (docs/design/canada.md). It can
     change until a document carries a tax code; after that the documents
@@ -232,6 +248,7 @@ def update_settings(
             detail=" ".join(problems) + " Nothing was saved.",
         )
     _guard_tax_country(db, cleaned)
+    _check_default_tax_code(db, cleaned)
     for key, value in cleaned.items():
         set_setting(db, key, value)
     db.commit()

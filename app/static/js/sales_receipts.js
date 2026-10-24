@@ -173,7 +173,7 @@ const SalesReceiptsPage = {
                             <option value="">Undeposited Funds (default)</option>${bankOpts}</select></div>
                     ${classGroup}${jobGroup}
                     ${currencyFormGroupsHtml(null, null)}
-                    ${TaxCodes.groupHtml(null, 'SalesReceiptsPage.recalc()')}
+                    ${TaxCodes.groupHtml(TaxCodes.forNew(), 'SalesReceiptsPage.recalc()')}
                     <div class="form-group"><label>Tax Rate (%)</label>
                         <input name="tax_rate" type="number" step="0.0001" value="${+((sr.tax_rate || 0) * 100).toFixed(4)}"
                             oninput="SalesReceiptsPage.recalc()"></div>
