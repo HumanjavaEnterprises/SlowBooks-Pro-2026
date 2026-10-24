@@ -1,5 +1,12 @@
 # Canadian support — design notes (PARKED)
 
+Fork status (HumanjavaEnterprises/SlowBooks-Pro-2026, 2026-10-24): seam 1
+(tax codes with recoverable components, built first as a general feature
+and proposed upstream in #456), the sales-tax half of seam 3 (the GST/HST
+return, with a QST summary) and seam 4's words and seeds (country,
+province, registration numbers, labels, province presets, CAD books) are
+built there. Seam 2 (payroll) and the payroll filings are not.
+
 Status: PARKED 2026-09-03. Trent asked for the full set (sales tax, payroll,
 filings, conversion), heard the sizing, and parked it so the v2.8 stage stays
 shippable. Nothing here is committed product behavior.

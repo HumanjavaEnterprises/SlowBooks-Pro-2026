@@ -5,6 +5,46 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### Unreleased: tax codes, and Canadian sales tax (#456)
+
+**Tax codes.** A document can be taxed by a tax code instead of one typed
+rate: a named set of components (a state, county and city rate; GST and
+PST), each taxed and rounded on its own and posted to its own payable
+account. A component can be recoverable, so a purchase claims it back to
+its own account instead of adding it to what the lines cost. Every
+tax-bearing document takes a code: invoices, sales receipts, estimates,
+credit memos, recurring schedules, bills, vendor credits, purchase orders,
+paid expenses and card charges (whose total includes the tax). A code's
+rates are fixed once a document uses it; a new rate is a new code, and the
+old one is archived. The Sales Tax report breaks the tax out by component,
+checks itself against every tax account, and a tax payment can name the
+account it pays down. A document with no code posts exactly as before.
+Settings → Tax Codes manages them; printed documents show each component.
+
+**Canadian sales tax** (Settings → Company Information → Sales Tax Country):
+
+- A Canadian company records its province and its GST/HST and QST
+  registration numbers, each checked against its format, and prints them
+  on sales documents. Its books are kept in Canadian dollars. The country
+  can change until a document carries a tax code, then stays.
+- One click sets up the province's codes and the accounts they post to
+  (GST/HST and its input tax credits on one account; QST and PST/RST on
+  their own), from a rate table verified 2026-10-23: HST, GST with PST,
+  RST or QST, GST alone, a "(no ITC)" code for tax that can't be claimed,
+  Zero-rated and Exempt, optionally the codes for sales shipped to other
+  provinces, and Nova Scotia's 15% for documents dated before 2025-04-01.
+  New documents start on the province's code.
+- A customer can pay the federal tax, the provincial tax, or both (a PST
+  exemption certificate), and each document keeps what it charged.
+- Reports → GST/HST Return: the GST34's lines for a period, read from the
+  ledger, with a reconciliation, a warning for tax charged without a code,
+  payment and refund recording, a QST summary for Quebec, PDF and CSV.
+
+Known limits: the return is the regular method only; line 101 counts
+invoiced sales only; register entries, cheques written from the register
+and the IIF export do not carry tax codes yet; bill lines are all taxable
+under a bill's code; QST adjustment lines are not entered.
+
 ### v2.26.0 — Direct deposit from the page, and last year beside this one
 
 The sentence a Server Edition server answers for a company it cannot open
