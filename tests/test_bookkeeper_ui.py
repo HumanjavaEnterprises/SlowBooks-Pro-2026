@@ -170,6 +170,16 @@ SETTINGS_TAKEN = {
         "/api/settings",
         {"company_type": "nonprofit"},
     ),
+    "Company Information › tax_country": (
+        "PUT",
+        "/api/settings",
+        {"tax_country": "CA"},
+    ),
+    "Tax Codes › Add Tax Code": (
+        "POST",
+        "/api/tax-codes",
+        {"name": "GST", "components": [{"name": "GST", "rate": 0.05}]},
+    ),
     "Closing Date › Clear": ("PUT", "/api/settings", {"closing_date": ""}),
     "Email (SMTP) › Send Test Email": ("POST", "/api/settings/test-email", None),
     "Receipt Scanning › #ocr-engine-pref": (

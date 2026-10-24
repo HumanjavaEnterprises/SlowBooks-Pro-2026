@@ -8,14 +8,23 @@
 # on the documents that used it). A code in use is never deleted.
 # ============================================================================
 
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.accounts import Account, AccountType
 from app.models.tax_codes import TaxCode, TaxCodeComponent
-from app.schemas.tax_codes import TaxCodeCreate, TaxCodeResponse, TaxCodeUpdate
-from app.services import tax_codes
+from app.schemas.tax_codes import (
+    CanadaPresetRequest,
+    TaxCodeComponentIn,
+    TaxCodeCreate,
+    TaxCodeResponse,
+    TaxCodeUpdate,
+)
+from app.services import canada_tax, tax_codes
+from app.services.settings_service import is_canadian
 
 router = APIRouter(prefix="/api/tax-codes", tags=["tax_codes"])
 
@@ -105,6 +114,91 @@ def _refuse_duplicate_name(db: Session, name: str, code_id=None) -> None:
         raise HTTPException(
             status_code=409, detail=f"A tax code named '{name}' already exists"
         )
+
+
+def _account_row(acct: Account) -> dict:
+    return {"id": acct.id, "account_number": acct.account_number, "name": acct.name}
+
+
+@router.post("/presets/canada")
+def create_canada_preset(data: CanadaPresetRequest, db: Session = Depends(get_db)):
+    """The standard sales tax codes of a Canadian province, and the GST/HST,
+    QST and PST/RST payable accounts they post to, from the rate table in
+    app/services/canada_tax.py. Safe to run again: a code or account that is
+    there already is left as it is and listed under `existing`."""
+    if not is_canadian(db):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Canadian sales tax codes are for a company whose tax country "
+                "is Canada. Choose Canada under Settings, Company Information, "
+                "first."
+            ),
+        )
+    province = canada_tax.PROVINCES.get(data.province.strip().upper())
+    if province is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"'{data.province}' is not a province or territory code. Use "
+                f"one of: {', '.join(canada_tax.PROVINCES)}."
+            ),
+        )
+    before = data.include_before_2025_04_01 and province.code == "NS"
+
+    created = {"accounts": [], "tax_codes": []}
+    existing = {"accounts": [], "tax_codes": []}
+    account_ids = {}
+    for kind, (number, name) in canada_tax.account_plan(province).items():
+        acct, made = canada_tax.tax_account(db, number, name)
+        account_ids[kind] = acct.id
+        (created if made else existing)["accounts"].append(_account_row(acct))
+
+    notes = canada_tax.notes(province, before_2025_04_01=before)
+    new_codes = []
+    for plan in canada_tax.code_plans(province, before_2025_04_01=before):
+        found = db.query(TaxCode).filter(TaxCode.name == plan.name).first()
+        if found is not None:
+            existing["tax_codes"].append(_response(db, found))
+            # Left as it is either way: it may be on documents already.
+            have = tax_codes.effective_rate(found)
+            want = sum((c.rate for c in plan.components), Decimal("0"))
+            if have != want:
+                notes.append(
+                    f"'{found.name}' was already here at {canada_tax.percent(have)}, "
+                    f"not {canada_tax.percent(want)}, and was left as it is."
+                )
+            continue
+        components = []
+        for c in plan.components:
+            account_id = account_ids[c.kind]
+            # GST/HST and QST are claimed back on purchases, each into its
+            # own account; PST/RST never is.
+            recoverable = plan.recoverable and c.kind != canada_tax.PST
+            components.append(
+                TaxCodeComponentIn(
+                    name=c.name,
+                    rate=c.rate,
+                    payable_account_id=account_id,
+                    is_recoverable=recoverable,
+                    recoverable_account_id=account_id if recoverable else None,
+                )
+            )
+        code = TaxCode(name=plan.name, description=plan.description)
+        code.components = _components(db, components)
+        db.add(code)
+        db.flush()
+        new_codes.append(code)
+    db.commit()
+    created["tax_codes"] = [_response(db, c) for c in new_codes]
+    return {
+        "province": province.code,
+        "province_name": province.name,
+        "rates_verified": canada_tax.RATES_VERIFIED,
+        "created": created,
+        "existing": existing,
+        "notes": notes,
+    }
 
 
 @router.get("", response_model=list[TaxCodeResponse])

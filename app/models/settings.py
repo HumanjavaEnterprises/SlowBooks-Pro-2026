@@ -30,6 +30,15 @@ DEFAULT_SETTINGS = {
     # dashboard layout and the on-demand net-asset accounts. Data never
     # changes name; only what is rendered. business | nonprofit
     "company_type": "business",
+    # The country the company collects sales tax in: US | CA. CA adds the
+    # Canadian Sales Tax settings below, the province presets under Tax
+    # Codes and the Canadian address words; US sees none of it, and the
+    # three Canadian keys are left out of what GET /api/settings answers
+    # (docs/design/canada.md).
+    "tax_country": "US",
+    "tax_province": "",  # two letters: ON, QC, BC ...
+    "gst_hst_registration_number": "",  # 123456789RT0001
+    "qst_registration_number": "",  # 1234567890TQ0001
     "company_name": "My Company",
     "company_address1": "",
     "company_address2": "",

@@ -75,3 +75,11 @@ class TaxCodeResponse(BaseModel):
     components: list[TaxCodeComponentResponse] = []
 
     model_config = {"from_attributes": True}
+
+
+class CanadaPresetRequest(StrictModel):
+    # checked against the provinces by the route, which says which it takes
+    province: str = Field(..., max_length=40)
+    # Nova Scotia only: also the 15% HST code for documents dated before
+    # 2025-04-01, when the rate fell to 14%.
+    include_before_2025_04_01: bool = False

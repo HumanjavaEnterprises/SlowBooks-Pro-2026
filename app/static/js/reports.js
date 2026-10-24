@@ -24,6 +24,7 @@ const ReportsPage = {
         'ar-aging':             { label: () => T('Accounts Receivable Aging'), open: (p) => ReportsPage.arAging(p), asOf: true },
         'ap-aging':             { label: 'Accounts Payable Aging',    open: (p) => ReportsPage.apAging(p), asOf: true },
         'sales-tax':            { label: 'Sales Tax Report',   open: (p) => ReportsPage.salesTax(p) },
+        'gst-hst-return':       { label: 'GST/HST Return',     open: (p) => ReportsPage.gstHstReturn(p) },
         'general-ledger':       { label: 'General Ledger',     open: (p) => ReportsPage.generalLedger(p), keep: ['class_id'] },
         'income-by-customer':   { label: () => T('Income by Customer'), open: (p) => ReportsPage.incomeByCustomer(p) },
         'trial-balance':        { label: 'Trial Balance',      open: (p) => ReportsPage.trialBalance(p) },
@@ -352,6 +353,7 @@ const ReportsPage = {
                 ${card('ar-aging', T('A/R Aging'), 'Outstanding receivables by age')}
                 ${card('ap-aging', 'A/P Aging', 'Outstanding payables by age')}
                 ${card('sales-tax', 'Sales Tax', 'Tax collected by invoice')}
+                ${ReportsPage._isCanadian() ? card('gst-hst-return', 'GST/HST Return', 'The GST34 lines for a period, with the QST beside them') : ''}
                 ${card('general-ledger', 'General Ledger', 'All journal entries by account')}
                 ${card('income-by-customer', T('Income by Customer'), Terms.isNonprofit() ? 'Contribution totals per donor' : 'Sales totals per customer')}
                 ${card('customer-statement', T('Customer Statement'), Terms.text('Invoice/payment history PDF'))}
@@ -1250,6 +1252,137 @@ const ReportsPage = {
                     ${reconcile}
                 </div>`;
         }, "Dates", false, { reportType: 'sales_tax', view: 'sales-tax', prefill });
+    },
+
+    // A Canadian company: its tax country, chosen once when the company was
+    // made (docs/design/canada.md). Everything Canadian is behind this, so a
+    // US company sees exactly what it always has.
+    _isCanadian() {
+        const settings = (typeof App !== 'undefined' && App.settings) || {};
+        return String(settings.tax_country || 'US').toUpperCase() === 'CA';
+    },
+
+    // The GST/HST return (GST34): what the GST and HST components posted in
+    // the period, the revenue the Sales Tax report counts, and the four
+    // amounts only the filer knows (adjustments, instalments, rebates),
+    // typed into their lines and carried on the address, so a saved report
+    // and an export keep them. Paid through the Sales Tax payment, on the
+    // GST/HST account.
+    _GST_ENTERED: ['104', '107', '110', '111'],
+    _gst: null,
+
+    async gstHstReturn(prefill) {
+        if (!ReportsPage._isCanadian()) {
+            toast('The GST/HST return is for companies set up in Canada.', 'error');
+            return;
+        }
+        const p = prefill || {};
+        const params = {};
+        for (const n of ReportsPage._GST_ENTERED) {
+            const v = p[`line_${n}`];
+            if (v !== undefined && v !== null && v !== '' && Number.isFinite(Number(v))) params[`line_${n}`] = String(v);
+        }
+        await ReportsPage.openPeriodModal('GST/HST Return', 'last_quarter', async (_period, range, live) => {
+            const entered = ReportsPage._GST_ENTERED
+                .filter(n => live[`line_${n}`])
+                .map(n => `&line_${n}=${encodeURIComponent(live[`line_${n}`])}`).join('');
+            const qs = `start_date=${range.start}&end_date=${range.end}${entered}`;
+            const data = await API.get(`/reports/gst-hst-return?${qs}`);
+            ReportsPage._gst = { data, live: { ...live, start_date: range.start, end_date: range.end } };
+            const totals = ['105', '108', '109', '113A'];
+            const lines = data.lines.map(l => {
+                const amount = l.entered
+                    ? `<input type="number" step="0.01" placeholder="0.00" style="width:110px; text-align:right;"
+                            aria-label="Line ${escapeHtml(l.key)}: ${escapeHtml(l.label)}" value="${escapeHtml(live[`line_${l.key}`] || '')}"
+                            onchange="ReportsPage.setParam('line_${l.key}', this.value)">`
+                    : formatCurrency(l.amount);
+                const bold = totals.includes(l.key) ? ' style="font-weight:700; background:var(--gray-50);"' : '';
+                return `<tr data-row-key="gst:${escapeHtml(l.key)}"${bold}><td>${escapeHtml(l.line || '')}</td><td>${escapeHtml(l.label)}</td><td class="amount">${amount}</td></tr>`;
+            }).join('');
+            const comps = data.components.map(c => `<tr>
+                    <td>${escapeHtml(c.tax_code)}</td><td>${escapeHtml(c.name)}</td>
+                    <td class="amount">${SalesLines.taxPercent(c.rate)}%</td>
+                    <td class="amount">${formatCurrency(c.collected)}</td>
+                    <td class="amount">${formatCurrency(c.recoverable)}</td>
+                </tr>`).join('');
+            const quebec = data.files_with_revenu_quebec
+                ? `<div>A business in Quebec files its GST/HST with Revenu Québec, on FPZ-500. Lines 101 to 111 are numbered the same there; the balance, the refund and the amount owing are shown without numbers because FPZ-500 numbers those lines differently.</div>`
+                : '';
+            const qst = data.qst ? `
+                <h4 style="margin:14px 0 4px; font-size:12px;">QST</h4>
+                <div class="table-container"><table>
+                    <tbody>
+                        <tr><td>QST collected</td><td class="amount">${formatCurrency(data.qst.collected)}</td></tr>
+                        <tr><td>QST input tax refunds (ITRs)</td><td class="amount">${formatCurrency(data.qst.input_tax_refunds)}</td></tr>
+                        <tr style="font-weight:700; background:var(--gray-50);"><td>Net QST</td><td class="amount">${formatCurrency(data.qst.net)}</td></tr>
+                    </tbody>
+                </table></div>
+                <div style="font-size:11px; color:var(--gray-500); margin-top:4px;">QST is not on the GST/HST return. These amounts are to be entered on Revenu Québec's return (FPZ-500); they are shown without its line numbers, which this report has not been able to confirm.</div>` : '';
+            const ledger = data.ledger;
+            const agrees = ledger && Math.abs(ledger.difference) < 0.005;
+            const names = ledger ? ledger.accounts.map(a => `${escapeHtml(a.account_number || '')} ${escapeHtml(a.name)}`).join(', ') : '';
+            const reconcile = ledger ? `
+                <div style="font-size:12px; margin-top:8px; border-top:1px solid var(--gray-200); padding-top:6px;">
+                    ${names}: net GST/HST posted this period <strong>${formatCurrency(ledger.tax_posted)}</strong>
+                    ${agrees
+                        ? ', which agrees with lines 103 less 106.'
+                        : `, which <span style="color:var(--danger); font-weight:700;">differs from lines 103 less 106 by ${formatCurrency(ledger.difference)}</span>. Something posted to these accounts in these dates without a GST or HST component (a document with no tax code, a journal entry, a void of an earlier sale).`}
+                    ${Math.abs(ledger.other_tax) >= 0.005 ? `<div>These accounts also hold ${escapeHtml(ledger.other_tax_names.join(', ') || 'another tax')}: ${formatCurrency(ledger.other_tax)} this period, left out of the return; the balance below includes it.</div>` : ''}
+                    <div>Paid this period: ${formatCurrency(ledger.payments)} · Owed at ${formatDate(data.end_date)}: <strong>${formatCurrency(ledger.balance)}</strong></div>
+                </div>` : '';
+            const owing = (data.lines.find(l => l.key === '115') || {}).amount || 0;
+            const payable = ledger ? ledger.accounts.filter(a => a.payable) : [];
+            const pay = owing > 0 && payable.length
+                ? `<button class="btn btn-primary" data-write onclick="ReportsPage.payGstHst()">Pay GST/HST…</button>`
+                : '';
+            return `${ReportsPage._exportButtons('gst-hst-return', qs)}
+                <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}</p>
+                <div class="table-container"><table>
+                    <thead><tr><th scope="col">Line</th><th scope="col">Description</th><th scope="col" class="amount">Amount</th></tr></thead>
+                    <tbody>${lines}</tbody>
+                </table></div>
+                <div style="font-size:11px; color:var(--gray-500); margin-top:4px; display:grid; gap:4px;">
+                    <div>Lines 104, 107, 110 and 111 are amounts the books do not hold (adjustments, instalments paid, rebates claimed). They are 0 until you type them in, and the totals follow.</div>
+                    <div>Lines 113B and 113C add GST/HST you self-assess (lines 205 and 405), which these books do not track; any you have changes the refund or the amount owing. The CRA does not pay a refund of $2 or less.</div>
+                    ${quebec}
+                </div>
+                <h4 style="margin:14px 0 4px; font-size:12px;">GST and HST by tax code</h4>
+                <div class="table-container"><table>
+                    <thead><tr><th scope="col">Tax code</th><th scope="col">Component</th><th scope="col" class="amount">Rate</th><th scope="col" class="amount">Collected (103)</th><th scope="col" class="amount">ITCs (106)</th></tr></thead>
+                    <tbody>${comps || '<tr><td colspan="5" style="text-align:center; color:var(--gray-400);">No GST or HST in these dates</td></tr>'}</tbody>
+                </table></div>
+                <div style="font-size:11px; color:var(--gray-500); margin-top:4px;">The return counts the tax-code components named GST or HST. A provincial tax (PST, RST, QST) is filed with its province, not on this return.</div>
+                ${qst}
+                <div style="margin-top:12px; padding:8px; background:var(--gray-50); border:1px solid var(--gray-200);">
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                        <div style="font-size:14px; font-weight:700; color:var(--qb-navy);">${owing > 0 ? `Amount owing: ${formatCurrency(owing)}` : `Refund claimed: ${formatCurrency((data.lines.find(l => l.key === '114') || {}).amount || 0)}`}</div>
+                        ${pay}
+                    </div>
+                    ${reconcile}
+                </div>`;
+        }, "Dates", false, { reportType: 'gst_hst_return', view: 'gst-hst-return', params, prefill });
+    },
+
+    // Pay what the return owes, on the GST/HST account, through the Sales
+    // Tax payment; the return opens again on the same dates and amounts,
+    // with the payment in its reconciliation.
+    payGstHst() {
+        const g = ReportsPage._gst;
+        if (!g || !g.data.ledger) return;
+        const owing = (g.data.lines.find(l => l.key === '115') || {}).amount || 0;
+        // ITCs in an account of their own (not netted on the GST/HST
+        // account) come off it with the payment, or both balances would
+        // grow every period while their sum read zero
+        const itcAccounts = g.data.ledger.accounts.filter(a => !a.payable);
+        const itc = (g.data.lines.find(l => l.key === '106') || {}).amount || 0;
+        TaxPage.showPaySalesTax({
+            title: 'Pay GST/HST',
+            amount: owing,
+            credits: itcAccounts.length === 1 && itc > 0 ? { account_id: itcAccounts[0].id, amount: itc } : null,
+            taxAccounts: g.data.ledger.accounts.filter(a => a.payable),
+            done: 'GST/HST payment recorded',
+            onDone: () => ReportsPage.gstHstReturn({ ...g.live, period: 'custom' }),
+        });
     },
 
     // The General Ledger's filters (#236): one account, one class, or both,

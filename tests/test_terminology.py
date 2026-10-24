@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 
 from app.services import terminology
-from app.services.terminology import NONPROFIT, PROTECTED_WORDS, Terms
+from app.services.terminology import CANADA, NONPROFIT, PROTECTED_WORDS, Terms
 
 ROOT = Path(__file__).resolve().parent.parent
 TERMS_JS = ROOT / "app/static/js/terms.js"
@@ -425,7 +425,8 @@ def test_every_T_call_resolves_to_a_dictionary_key():
     """T('Job name') is not a key, so it rendered "Job name" for a nonprofit —
     the wrapper looked right and did nothing (2.9.1 audit). Every argument
     must be a key, or a singular/plural of one, case-insensitively."""
-    keys = {k.lower() for k in NONPROFIT}
+    # the Canadian labels are keys too (Settings -> tax country Canada)
+    keys = {k.lower() for k in NONPROFIT} | {k.lower() for k in CANADA}
 
     def resolves(arg):
         a = arg.lower()

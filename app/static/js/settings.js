@@ -118,9 +118,9 @@ const SettingsPage = {
                             <input name="company_address2" value="${escapeHtml(s.company_address2 || '')}"></div>
                         <div class="form-group"><label>City</label>
                             <input name="company_city" value="${escapeHtml(s.company_city || '')}"></div>
-                        <div class="form-group"><label>State</label>
+                        <div class="form-group"><label>${T('State')}</label>
                             <input name="company_state" value="${escapeHtml(s.company_state || '')}"></div>
-                        <div class="form-group"><label>ZIP</label>
+                        <div class="form-group"><label>${T('ZIP')}</label>
                             <input name="company_zip" value="${escapeHtml(s.company_zip || '')}"></div>
                         <div class="form-group"><label>Phone</label>
                             <input name="company_phone" value="${escapeHtml(s.company_phone || '')}"></div>
@@ -128,7 +128,7 @@ const SettingsPage = {
                             <input name="company_email" type="email" value="${escapeHtml(s.company_email || '')}"></div>
                         <div class="form-group"><label>Website</label>
                             <input name="company_website" value="${escapeHtml(s.company_website || '')}"></div>
-                        <div class="form-group"><label>Tax ID / EIN</label>
+                        <div class="form-group"><label>${T('Tax ID / EIN')}</label>
                             <input name="company_tax_id" value="${escapeHtml(s.company_tax_id || '')}"></div>
                         <div class="form-group full-width"><label for="company-type">Company Type</label>
                             <select id="company-type" name="company_type" onchange="SettingsPage.changeCompanyType(this)">
@@ -137,8 +137,16 @@ const SettingsPage = {
                             </select>
                             <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Nonprofit shows donors, pledges, donations and funds in place of customers, invoices, sales receipts and classes, and adds the net-asset accounts and statements. Your data does not change; switch back any time.</div>
                         </div>
+                        <div class="form-group full-width"><label for="tax-country">Sales Tax Country</label>
+                            <select id="tax-country" name="tax_country" onchange="SettingsPage.changeTaxCountry(this)">
+                                <option value="US" ${s.tax_country !== 'CA' ? 'selected' : ''}>United States</option>
+                                <option value="CA" ${s.tax_country === 'CA' ? 'selected' : ''}>Canada</option>
+                            </select>
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Canada adds the GST/HST and QST registration numbers, a province's sales tax codes under Tax Codes, and Canadian address labels. Your data does not change.</div>
+                        </div>
                     </div>
                 </div>
+                ${SettingsPage._canadaSection(s)}
 
                 <div class="settings-section" role="group" aria-labelledby="settings-h-company-logo">
                     <h3 id="settings-h-company-logo">Company Logo</h3>
@@ -209,6 +217,7 @@ const SettingsPage = {
                     <div style="margin-bottom:12px;" data-admin data-write>
                         <button type="button" class="btn btn-primary" onclick="SettingsPage.editTaxCode(null)">Add Tax Code</button>
                     </div>
+                    <div id="tax-presets">${SettingsPage._canadaPresets(s)}</div>
                     <div id="tax-codes-list"></div>
                 </div>
 
@@ -1232,6 +1241,10 @@ const SettingsPage = {
                 ? saved.closing_date : (data.closing_date || '');
             SettingsPage._markClean();
             SettingsPage.showClosingState();
+            // the presets name the province just saved, not the one the
+            // page opened with (a button saying Ontario set up Quebec)
+            const presets = document.getElementById('tax-presets');
+            if (presets && saved) presets.innerHTML = SettingsPage._canadaPresets(saved);
             // the shell's copy too: a new company name shows in the status
             // bar, the title and the topbar now, not at the next start
             if (saved && typeof App !== 'undefined' && typeof App.showCompany === 'function') {
@@ -2675,4 +2688,116 @@ SettingsPage.deleteTaxCode = async function (id) {
         toast('Tax code deleted');
         SettingsPage.loadTaxCodes();
     } catch (err) { toast(err.message, 'error'); }
+};
+
+// --- Canadian sales tax (Settings, tax country Canada) -------------------
+// A US company sees none of this but the country choice: the section, the
+// presets and the Canadian labels are drawn only for tax_country CA, which
+// the server sends only to a Canadian company (docs/design/canada.md).
+// The rates live in one place, app/services/canada_tax.py; this names the
+// provinces for the picker and the button.
+SettingsPage._PROVINCES = {
+    AB: 'Alberta', BC: 'British Columbia', MB: 'Manitoba', NB: 'New Brunswick',
+    NL: 'Newfoundland and Labrador', NS: 'Nova Scotia', NT: 'Northwest Territories',
+    NU: 'Nunavut', ON: 'Ontario', PE: 'Prince Edward Island', QC: 'Quebec',
+    SK: 'Saskatchewan', YT: 'Yukon',
+};
+
+SettingsPage._canadaSection = function (s) {
+    if (s.tax_country !== 'CA') return '';
+    const opts = Object.entries(SettingsPage._PROVINCES).map(([code, name]) =>
+        `<option value="${code}" ${s.tax_province === code ? 'selected' : ''}>${escapeHtml(name)}</option>`).join('');
+    return `<div class="settings-section" role="group" aria-labelledby="settings-h-canada-tax">
+                    <h3 id="settings-h-canada-tax">Canadian Sales Tax</h3>
+                    <div class="form-grid">
+                        <div class="form-group"><label for="tax-province">Province or Territory</label>
+                            <select id="tax-province" name="tax_province">
+                                <option value="" ${s.tax_province ? '' : 'selected'}>Choose one</option>${opts}
+                            </select></div>
+                        <div class="form-group"><label for="gst-hst-number">GST/HST Registration Number</label>
+                            <input id="gst-hst-number" name="gst_hst_registration_number" maxlength="20" placeholder="123456789RT0001"
+                                title="The 9-digit business number, RT and the 4-digit account number"
+                                value="${escapeHtml(s.gst_hst_registration_number || '')}"></div>
+                        <div class="form-group"><label for="qst-number">QST Registration Number</label>
+                            <input id="qst-number" name="qst_registration_number" maxlength="20" placeholder="1234567890TQ0001"
+                                title="10 digits, TQ and 4 digits; Quebec registrants only"
+                                value="${escapeHtml(s.qst_registration_number || '')}"></div>
+                    </div>
+                    <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">The province is where the company collects sales tax; its codes are set up under Tax Codes. The QST number is for a company registered with Revenu Québec.</div>
+                </div>`;
+};
+
+SettingsPage._canadaPresets = function (s) {
+    if (s.tax_country !== 'CA') return '';
+    const name = SettingsPage._PROVINCES[s.tax_province];
+    if (!name) {
+        return '<div class="hint" style="margin-bottom:12px;">Choose the province under Canadian Sales Tax and save, and its sales tax codes can be set up here.</div>';
+    }
+    const ns = s.tax_province === 'NS' ? `
+            <button type="button" class="btn btn-secondary" onclick="SettingsPage.setupCanadaTaxCodes(true)">Also add the 15% HST code for documents dated before 2025-04-01</button>
+            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Nova Scotia's HST is 14% from 2025-04-01 and was 15% before. A tax code has one rate, so documents dated before 2025-04-01 need the 15% code.</div>` : '';
+    return `<div style="margin-bottom:12px;" data-admin data-write>
+            <button type="button" class="btn btn-secondary" onclick="SettingsPage.setupCanadaTaxCodes(false)">Set up ${escapeHtml(name)} sales tax codes</button>${ns}
+            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Adds the province's codes, GST alone where a provincial tax sits beside it, Zero-rated and Exempt, and the GST/HST, QST or PST payable accounts they post to. Codes and accounts already here are left as they are.</div>
+            <div id="tax-presets-result" class="hint" role="status" style="margin-top:8px;" hidden></div>
+        </div>`;
+};
+
+// The country saves on its own and reloads, like the company type: the
+// labels it picks are applied at boot (Terms.init).
+SettingsPage.changeTaxCountry = async function (sel) {
+    const value = sel.value;
+    const previous = value === 'CA' ? 'US' : 'CA';
+    const others = SettingsPage.isDirty('tax_country');
+    const msg = (value === 'CA'
+        ? 'Collect Canadian sales tax? Settings gains the GST/HST and QST registration numbers and the province tax codes, and the company address says Province and Postal Code. Nothing in your data changes.'
+        : 'Go back to United States sales tax? The Canadian settings and labels are hidden; tax codes already set up stay as they are. Nothing in your data changes.')
+        + (others ? '\n\nYour other unsaved changes on this page are saved with it.' : '');
+    if (!confirm(msg)) { sel.value = previous; return; }
+    const form = document.getElementById('settings-form');
+    if (others && form && !form.reportValidity()) { sel.value = previous; return; }
+    try {
+        const payload = others ? SettingsPage._formData() : {};
+        payload.tax_country = value;
+        await API.put('/settings', payload);
+        SettingsPage._leaving = true;
+        toast('Sales tax country saved. Reloading...');
+        setTimeout(() => location.reload(), 600);
+    } catch (err) {
+        sel.value = previous;
+        toast(err.message, 'error');
+    }
+};
+
+// The province saved in Settings, not the one on the picker: the button
+// names the saved one.
+SettingsPage.setupCanadaTaxCodes = async function (before20250401) {
+    const el = document.getElementById('tax-presets-result');
+    // one setup at a time: a second click while the first runs would race
+    // it to the same code names and account numbers
+    const box = document.getElementById('tax-presets');
+    const buttons = box && typeof box.querySelectorAll === 'function' ? [...box.querySelectorAll('button')] : [];
+    buttons.forEach(b => { b.disabled = true; });
+    try {
+        const s = await API.get('/settings');
+        const r = await API.post('/tax-codes/presets/canada', {
+            province: s.tax_province || '',
+            include_before_2025_04_01: !!before20250401,
+        });
+        const names = list => list.map(x => escapeHtml(x.account_number ? `${x.account_number} ${x.name}` : x.name)).join(', ');
+        const parts = [];
+        if (!r.created.tax_codes.length && !r.created.accounts.length) {
+            parts.push(`${escapeHtml(r.province_name)}'s codes were all set up already; nothing was added.`);
+        }
+        if (r.created.tax_codes.length) parts.push(`Tax codes added: ${names(r.created.tax_codes)}.`);
+        if (r.created.accounts.length) parts.push(`Accounts added: ${names(r.created.accounts)}.`);
+        if (r.existing.tax_codes.length) parts.push(`Already here: ${names(r.existing.tax_codes)}.`);
+        if (r.existing.accounts.length) parts.push(`Accounts used as they were: ${names(r.existing.accounts)}.`);
+        for (const note of r.notes || []) parts.push(escapeHtml(note));
+        parts.push(`Rates as checked on ${escapeHtml(r.rates_verified)}.`);
+        if (el) { el.innerHTML = parts.join(' '); el.hidden = false; }
+        toast(r.created.tax_codes.length ? 'Sales tax codes set up' : 'Nothing new to set up');
+        SettingsPage.loadTaxCodes();
+    } catch (err) { toast(err.message, 'error'); }
+    finally { buttons.forEach(b => { b.disabled = false; }); }
 };

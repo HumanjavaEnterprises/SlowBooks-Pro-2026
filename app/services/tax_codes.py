@@ -264,3 +264,80 @@ def component_totals(db: Session, start_date, end_date) -> list[dict]:
         row["net"] = _q(row["collected"] - row["recoverable"])
         out.append(row)
     return out
+
+
+def sales_documents(db: Session, start_date, end_date) -> list[tuple]:
+    """The sales a tax report reads for a period, in the company's currency:
+    (kind, document, number, subtotal, taxable, tax) per invoice and credit
+    memo, a credit memo's amounts negative, oldest first. The Sales Tax
+    report lists them and the GST/HST return takes its revenue from them,
+    so the two never count a different set of sales."""
+    # Eager loads avoid an N+1 on .customer / .lines in the loops below.
+    from sqlalchemy.orm import joinedload, selectinload
+
+    from app.models.credit_memos import CreditMemo, CreditMemoStatus
+    from app.models.invoices import Invoice, InvoiceStatus
+    from app.services.accounting import taxable_subtotal
+    from app.services.currency import to_home
+
+    invoices = (
+        db.query(Invoice)
+        .options(joinedload(Invoice.customer), selectinload(Invoice.lines))
+        .filter(Invoice.date >= start_date, Invoice.date <= end_date)
+        .filter(Invoice.status != InvoiceStatus.VOID)
+        .all()
+    )
+    # A write-off forgives a balance to Bad Debt; it returns no goods and
+    # carries no tax, so it is not a sale reversed.
+    memos = (
+        db.query(CreditMemo)
+        .options(joinedload(CreditMemo.customer), selectinload(CreditMemo.lines))
+        .filter(CreditMemo.date >= start_date, CreditMemo.date <= end_date)
+        .filter(CreditMemo.status != CreditMemoStatus.VOID)
+        .filter(CreditMemo.is_write_off.isnot(True))
+        .all()
+    )
+
+    rows = []
+    for inv in invoices:
+        # Booked amounts: a foreign-currency invoice posts to the ledger at
+        # its exchange rate, and the tax is owed in the company's currency.
+        fx = Decimal(str(inv.exchange_rate or 1))
+        tax = to_home(inv.tax_amount or 0, fx)
+        # Only the taxable lines form the base (a labor line on a
+        # customer-owned device sits beside a taxed part).
+        taxable = to_home(taxable_subtotal(inv.lines), fx) if tax > 0 else _q(0)
+        subtotal = to_home(inv.subtotal or 0, fx)
+        rows.append(("invoice", inv, inv.invoice_number, subtotal, taxable, tax))
+    for cm in memos:
+        tax = _q(cm.tax_amount or 0)
+        taxable = taxable_subtotal(cm.lines) if tax > 0 else _q(0)
+        subtotal = _q(cm.subtotal or 0)
+        rows.append(("credit_memo", cm, cm.memo_number, -subtotal, -taxable, -tax))
+    rows.sort(key=lambda r: (r[1].date, r[0] != "invoice", str(r[2])))
+    return rows
+
+
+def recoverable_accounts(db: Session) -> list[int]:
+    """The accounts recoverable components post tax claimed back to."""
+    rows = (
+        db.query(TaxCodeComponent.recoverable_account_id)
+        .filter(
+            TaxCodeComponent.is_recoverable.is_(True),
+            TaxCodeComponent.recoverable_account_id.isnot(None),
+        )
+        .distinct()
+        .all()
+    )
+    return [account_id for (account_id,) in rows]
+
+
+def any_document_taxed_by_code(db: Session) -> bool:
+    """True when any document names any tax code."""
+    import importlib
+
+    for module, name in DOCUMENT_MODELS:
+        model = getattr(importlib.import_module(module), name)
+        if db.query(model.id).filter(model.tax_code_id.isnot(None)).first():
+            return True
+    return False

@@ -69,32 +69,54 @@ const TaxPage = {
         window.open(`/api/tax/schedule-c/csv?start_date=${start}&end_date=${end}`, '_blank');
     },
 
-    async showPaySalesTax() {
+    // opts (the GST/HST return's Pay): {title, amount, taxAccounts:
+    // [{id, account_number, name, balance}], credits: {account_id, amount}
+    // or null, done, onDone}. The tax is then paid
+    // down on the account picked from taxAccounts, the amount the return
+    // owes offered, instead of Sales Tax Payable's balance.
+    async showPaySalesTax(opts = {}) {
+        TaxPage._payOpts = opts;
+        const owedOn = opts.taxAccounts && opts.taxAccounts.length ? opts.taxAccounts : null;
         // Tax is paid out of a bank or card account — never Accounts
         // Receivable, Inventory or Undeposited Funds, which the old
         // every-asset list offered (the server refuses those too).
         const [accounts, balSheet] = await Promise.all([
             API.get('/accounts?bank=1&active_only=true'),
-            API.get('/reports/balance-sheet'),
+            owedOn ? null : API.get('/reports/balance-sheet'),
         ]);
 
-        // Find Sales Tax Payable balance
-        const taxLiability = balSheet.liabilities.find(l => l.account_number === '2200');
-        const taxBalance = taxLiability ? Math.abs(taxLiability.amount) : 0;
+        let taxBalance, summary, taxPicker = '';
+        if (owedOn) {
+            taxBalance = Math.max(Number(opts.amount) || 0, 0);
+            summary = `<strong>Amount owing:</strong> ${formatCurrency(taxBalance)}`;
+            if (opts.credits && opts.credits.amount > 0) {
+                summary += `<div class="hint" style="margin-top:4px;">The ${formatCurrency(opts.credits.amount)} of input tax credits claimed comes off their own account with this payment.</div>`;
+            }
+            const taxOpts = owedOn.map(a => `<option value="${a.id}">${escapeHtml(a.account_number || '')} ${escapeHtml(a.name)} (${formatCurrency(a.balance)})</option>`).join('');
+            taxPicker = `<div class="form-group"><label>Tax Account *</label>
+                        <select name="tax_account_id" required>${taxOpts}</select></div>`;
+        } else {
+            // Find Sales Tax Payable balance
+            const taxLiability = balSheet.liabilities.find(l => l.account_number === '2200');
+            taxBalance = taxLiability ? Math.abs(taxLiability.amount) : 0;
+            summary = `<strong>Sales Tax Payable Balance:</strong> ${formatCurrency(taxBalance)}`;
+        }
+        const title = opts.title || 'Pay Sales Tax';
 
         const bankOpts = accounts.map(a => `<option value="${a.id}">${escapeHtml(a.name)} (${formatCurrency(a.balance)})</option>`).join('');
         const noBank = accounts.length ? '' : '<small style="color:var(--danger);">No bank or credit card account yet. Add one under Banking first.</small>';
 
-        openModal('Pay Sales Tax', `
+        openModal(escapeHtml(title), `
             <form onsubmit="TaxPage.submitPaySalesTax(event)">
                 <div style="margin-bottom:12px; padding:8px; background:var(--primary-light); border-radius:4px;">
-                    <strong>Sales Tax Payable Balance:</strong> ${formatCurrency(taxBalance)}
+                    ${summary}
                 </div>
                 <div class="form-grid">
                     <div class="form-group"><label>Amount *</label>
                         <input name="amount" type="number" step="0.01" required value="${taxBalance.toFixed(2)}"></div>
                     <div class="form-group"><label>Date *</label>
                         <input name="date" type="date" required value="${todayISO()}"></div>
+                    ${taxPicker}
                     <div class="form-group"><label>Pay From Account *</label>
                         <select name="pay_from_account_id" required><option value="">Select...</option>${bankOpts}</select>${noBank}</div>
                     <div class="form-group"><label>Check #</label>
@@ -102,7 +124,7 @@ const TaxPage = {
                 </div>
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Pay Sales Tax</button>
+                    <button type="submit" class="btn btn-primary">${escapeHtml(title)}</button>
                 </div>
             </form>`);
     },
@@ -110,15 +132,23 @@ const TaxPage = {
     async submitPaySalesTax(e) {
         e.preventDefault();
         const form = e.target;
+        const opts = TaxPage._payOpts || {};
+        const body = {
+            amount: parseFloat(form.amount.value),
+            date: form.date.value,
+            pay_from_account_id: parseInt(form.pay_from_account_id.value),
+            check_number: form.check_number.value || null,
+        };
+        if (form.tax_account_id) body.tax_account_id = parseInt(form.tax_account_id.value);
+        if (opts.credits && opts.credits.amount > 0) {
+            body.recoverable_account_id = opts.credits.account_id;
+            body.recoverable_amount = opts.credits.amount;
+        }
         try {
-            await API.post('/reports/sales-tax/pay', {
-                amount: parseFloat(form.amount.value),
-                date: form.date.value,
-                pay_from_account_id: parseInt(form.pay_from_account_id.value),
-                check_number: form.check_number.value || null,
-            });
-            toast('Sales tax payment recorded');
-            App.refresh();
+            await API.post('/reports/sales-tax/pay', body);
+            toast(opts.done || 'Sales tax payment recorded');
+            if (typeof opts.onDone === 'function') opts.onDone();
+            else App.refresh();
         } catch (err) { toast(err.message, 'error'); }
     },
 };

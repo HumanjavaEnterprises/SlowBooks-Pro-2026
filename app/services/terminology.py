@@ -75,6 +75,18 @@ NONPROFIT: dict[str, str] = {
     "Revenue by Customer": "Revenue & Support by Donor",
 }
 
+# A Canadian company's address and tax-number labels (Settings ->
+# tax_country = CA). Exact labels only, never swapped inside a sentence:
+# "State" is also a US payroll tax and a 1099 box, and those pages stay
+# American. Keys are the US labels.
+CANADA: dict[str, str] = {
+    "State": "Province",
+    "ZIP": "Postal Code",
+    "Tax ID / EIN": "Business Number (BN)",
+}
+
+COUNTRIES = ("US", "CA")
+
 # Words that must never be mapped, whole or as a phrase start.
 PROTECTED_WORDS = ("Sales", "Sales Tax", "Vendor", "Bill", "Estimate", "Payment")
 
@@ -93,14 +105,17 @@ class Terms:
     the key itself otherwise. Plurals and lowercase forms of known keys
     resolve too, so ``t("invoices") -> "pledges"``."""
 
-    def __init__(self, mode: str = "business"):
+    def __init__(self, mode: str = "business", country: str = "US"):
         self.mode = mode if mode in MODES else "business"
+        self.country = country if country in COUNTRIES else "US"
 
     @property
     def is_nonprofit(self) -> bool:
         return self.mode == "nonprofit"
 
     def __call__(self, key: str) -> str:
+        if self.country == "CA" and key in CANADA:
+            return CANADA[key]
         if not self.is_nonprofit or not key:
             return key
         d = NONPROFIT
@@ -167,10 +182,16 @@ def document_reference(face: str, number, name: str | None = None) -> str:
 
 def terms_for(settings: dict | None) -> Terms:
     """Build from a settings dict (``get_all_settings``)."""
-    return Terms((settings or {}).get("company_type", "business"))
+    settings = settings or {}
+    return Terms(
+        settings.get("company_type", "business"), settings.get("tax_country", "US")
+    )
 
 
 def terms_from_db(db) -> Terms:
     from app.services.settings_service import get_setting_raw
 
-    return Terms(get_setting_raw(db, "company_type") or "business")
+    return Terms(
+        get_setting_raw(db, "company_type") or "business",
+        get_setting_raw(db, "tax_country") or "US",
+    )

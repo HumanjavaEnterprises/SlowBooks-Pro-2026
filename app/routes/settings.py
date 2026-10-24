@@ -18,7 +18,9 @@ from app.services.settings_service import (
     SECRET_PLACEHOLDER,
     SettingValueError,
     clean_setting_value,
+    for_country,
     get_all_settings,
+    get_setting_raw,
     redact_secrets,
     set_setting,
     unreadable_secret_keys,
@@ -52,6 +54,7 @@ ENUM_SETTINGS = {
     "ask_password_on_start": frozenset({"true", "false"}),
     "invoice_show_logo": frozenset({"true", "false"}),
     "class_warn_blank": frozenset({"true", "false"}),
+    "tax_country": frozenset({"US", "CA"}),
 }
 
 
@@ -67,6 +70,26 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 
+def _guard_tax_country(db: Session, cleaned: dict) -> None:
+    """The sales tax country is chosen once (docs/design/canada.md). It can
+    change until a document carries a tax code; after that the documents
+    were taxed, numbered and printed under that country's rules, and
+    switching would hide the registration numbers and accounts they used."""
+    new = cleaned.get("tax_country")
+    if new is None or new == (get_setting_raw(db, "tax_country") or "US"):
+        return
+    from app.services import tax_codes
+
+    if tax_codes.any_document_taxed_by_code(db):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "The sales tax country stays as it is: documents already carry "
+                "tax codes set up under it. Nothing was saved."
+            ),
+        )
+
+
 @router.get("")
 def get_settings(db: Session = Depends(get_db)):
     """Every company setting, secrets redacted.
@@ -78,8 +101,12 @@ def get_settings(db: Session = Depends(get_db)):
     orders, recurring templates) is a FRACTION (0.089), kept to six places.
     Divide by 100 before posting; the API rejects a document `tax_rate`
     above 1.
+
+    `tax_country` and the Canadian keys (`tax_province`,
+    `gst_hst_registration_number`, `qst_registration_number`) are answered
+    only for a company whose tax country is CA; absent means US.
     """
-    return _redact_secrets(get_all_settings(db))
+    return _redact_secrets(for_country(get_all_settings(db)))
 
 
 @router.get("/unreadable-secrets")
@@ -204,6 +231,7 @@ def update_settings(
             status_code=422,
             detail=" ".join(problems) + " Nothing was saved.",
         )
+    _guard_tax_country(db, cleaned)
     for key, value in cleaned.items():
         set_setting(db, key, value)
     db.commit()
@@ -211,7 +239,7 @@ def update_settings(
         from app.services.company_service import sync_manifest_name
 
         sync_manifest_name(incoming.get("company_name"))
-    return _redact_secrets(get_all_settings(db))
+    return _redact_secrets(for_country(get_all_settings(db)))
 
 
 @router.post("/test-email")

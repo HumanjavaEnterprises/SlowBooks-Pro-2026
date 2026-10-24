@@ -3,15 +3,14 @@ from datetime import date as dt_date
 from decimal import Decimal
 from typing import Optional
 
-from fastapi import Depends, HTTPException, Query
+from fastapi import Depends, HTTPException, Query, Request
 from app.schemas.common import StrictModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func as sqlfunc
 
 from app.database import get_db
-from app.services.accounting import _q, taxable_subtotal
+from app.services.accounting import _q
 from app.models.accounts import Account
-from app.models.invoices import Invoice, InvoiceStatus
 from app.models.contacts import Vendor
 from app.routes.reports._router import router
 from app.routes.invoices.helpers import _due_date_from_terms
@@ -27,6 +26,12 @@ class SalesTaxPaymentRequest(StrictModel):
     # The tax account paid down: Sales Tax Payable when none is named, else
     # one a tax-code component posts to (a county, a GST/HST account).
     tax_account_id: Optional[int] = None
+    # Input tax credits kept in their own account (not netted on the tax
+    # account) are settled by the same remittance: the tax account is paid
+    # down by the tax collected, the credits come off their account, and the
+    # bank pays the difference, which is `amount`.
+    recoverable_account_id: Optional[int] = None
+    recoverable_amount: Optional[Decimal] = None
     check_number: Optional[str] = ""
     reference: Optional[str] = None
 
@@ -50,47 +55,9 @@ def sales_tax_report(
     if not end_date:
         end_date = date.today()
 
-    # Eager loads avoid an N+1 on .customer / .lines in the loops below.
-    from sqlalchemy.orm import joinedload, selectinload
+    from app.services import tax_codes
 
-    from app.models.credit_memos import CreditMemo, CreditMemoStatus
-    from app.services.currency import to_home
-
-    invoices = (
-        db.query(Invoice)
-        .options(joinedload(Invoice.customer), selectinload(Invoice.lines))
-        .filter(Invoice.date >= start_date, Invoice.date <= end_date)
-        .filter(Invoice.status != InvoiceStatus.VOID)
-        .all()
-    )
-    # A write-off forgives a balance to Bad Debt; it returns no goods and
-    # carries no tax, so it is not a sale reversed.
-    memos = (
-        db.query(CreditMemo)
-        .options(joinedload(CreditMemo.customer), selectinload(CreditMemo.lines))
-        .filter(CreditMemo.date >= start_date, CreditMemo.date <= end_date)
-        .filter(CreditMemo.status != CreditMemoStatus.VOID)
-        .filter(CreditMemo.is_write_off.isnot(True))
-        .all()
-    )
-
-    rows = []
-    for inv in invoices:
-        # Booked amounts: a foreign-currency invoice posts to the ledger at
-        # its exchange rate, and the tax is owed in the company's currency.
-        fx = Decimal(str(inv.exchange_rate or 1))
-        tax = to_home(inv.tax_amount or 0, fx)
-        # Only the taxable lines form the base (a labor line on a
-        # customer-owned device sits beside a taxed part).
-        taxable = to_home(taxable_subtotal(inv.lines), fx) if tax > 0 else _q(0)
-        subtotal = to_home(inv.subtotal or 0, fx)
-        rows.append(("invoice", inv, inv.invoice_number, subtotal, taxable, tax))
-    for cm in memos:
-        tax = _q(cm.tax_amount or 0)
-        taxable = taxable_subtotal(cm.lines) if tax > 0 else _q(0)
-        subtotal = _q(cm.subtotal or 0)
-        rows.append(("credit_memo", cm, cm.memo_number, -subtotal, -taxable, -tax))
-    rows.sort(key=lambda r: (r[1].date, r[0] != "invoice", str(r[2])))
+    rows = tax_codes.sales_documents(db, start_date, end_date)
 
     items = []
     for kind, doc, number, subtotal, taxable, tax in rows:
@@ -114,8 +81,6 @@ def sales_tax_report(
     tax_on_sales = sum((r[5] for r in rows if r[0] == "invoice"), Decimal(0))
     tax_credited = -sum((r[5] for r in rows if r[0] == "credit_memo"), Decimal(0))
     total_tax = tax_on_sales - tax_credited
-
-    from app.services import tax_codes
 
     components = [
         {
@@ -254,10 +219,29 @@ def pay_sales_tax(data: SalesTaxPaymentRequest, db: Session = Depends(get_db)):
             status_code=400, detail="Sales Tax Payable account (2200) not found"
         )
 
+    credits = _q(data.recoverable_amount or 0)
+    if data.recoverable_account_id is not None or credits:
+        from app.services import tax_codes
+
+        if credits <= 0 or data.recoverable_account_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Input tax credits settled with a payment need both their "
+                "account and an amount above zero",
+            )
+        if data.recoverable_account_id not in tax_codes.recoverable_accounts(db):
+            raise HTTPException(
+                status_code=400,
+                detail="That account holds no tax claimed back. Name the account a "
+                "tax code's recoverable component posts to.",
+            )
+        if data.recoverable_account_id == tax_account_id:
+            credits = Decimal("0")  # netted on the tax account already
+
     journal_lines = [
         {
             "account_id": tax_account_id,
-            "debit": amount,
+            "debit": amount + credits,
             "credit": Decimal("0"),
             "description": "Sales tax payment",
         },
@@ -268,6 +252,15 @@ def pay_sales_tax(data: SalesTaxPaymentRequest, db: Session = Depends(get_db)):
             "description": "Sales tax payment",
         },
     ]
+    if credits:
+        journal_lines.append(
+            {
+                "account_id": data.recoverable_account_id,
+                "debit": Decimal("0"),
+                "credit": credits,
+                "description": "Input tax credits claimed",
+            }
+        )
 
     reference = data.reference if data.reference is not None else data.check_number
 
@@ -281,6 +274,136 @@ def pay_sales_tax(data: SalesTaxPaymentRequest, db: Session = Depends(get_db)):
     )
     db.commit()
     return {"status": "ok", "transaction_id": txn.id, "amount": float(amount)}
+
+
+def _gst_hst_return(db, start_date, end_date, line_104, line_107, line_110, line_111):
+    from app.services import gst_hst_return as svc
+
+    # A filing period is a month, a quarter or a year; with no dates, the
+    # year to date, as the Sales Tax report runs.
+    if not start_date:
+        start_date = date(date.today().year, 1, 1)
+    if not end_date:
+        end_date = date.today()
+    entered = {"104": line_104, "107": line_107, "110": line_110, "111": line_111}
+    return svc.gst_hst_return(db, start_date, end_date, entered)
+
+
+# Amounts only the person filing knows (adjustments, instalments, rebates),
+# given on the address so a saved report and an export carry them.
+# What a filer types is money: bounded like the schemas' amounts, so a
+# number no return could hold is a 422 rather than a failed rounding.
+_ENTERED = {
+    n: Query(
+        default=None,
+        description=f"Line {n}, entered by the filer",
+        ge=Decimal("-999999999999.99"),
+        le=Decimal("999999999999.99"),
+        max_digits=14,
+        decimal_places=2,
+        allow_inf_nan=False,
+    )
+    for n in ("104", "107", "110", "111")
+}
+
+
+@router.get("/gst-hst-return")
+def gst_hst_return(
+    start_date: date = Query(default=None),
+    end_date: date = Query(default=None),
+    line_104: Optional[Decimal] = _ENTERED["104"],
+    line_107: Optional[Decimal] = _ENTERED["107"],
+    line_110: Optional[Decimal] = _ENTERED["110"],
+    line_111: Optional[Decimal] = _ENTERED["111"],
+    db: Session = Depends(get_db),
+):
+    """The GST/HST return (GST34) for a Canadian company: its lines from the
+    ledger's GST and HST components and the period's sales, the QST summary
+    for a Quebec registrant, and the reconciliation against the GST/HST
+    accounts (app/services/gst_hst_return.py)."""
+    return _gst_hst_return(
+        db, start_date, end_date, line_104, line_107, line_110, line_111
+    )
+
+
+def _gst_hst_section(data: dict) -> dict:
+    from app.routes.reports.financial import _money
+
+    totals = ("105", "108", "109", "113A")
+    rows = [
+        {
+            "cells": [
+                f"{line['line'] or ''}  {line['label']}".strip(),
+                _money(line["amount"]),
+            ],
+            "style": "subtotal" if line["key"] in totals else "",
+        }
+        for line in data["lines"]
+    ]
+    qst = data.get("qst")
+    if qst:
+        rows += [
+            {
+                "cells": ["QST, for Revenu Québec's return (FPZ-500)", ""],
+                "style": "subtotal",
+            },
+            {"cells": ["QST collected", _money(qst["collected"])]},
+            {"cells": ["QST input tax refunds", _money(qst["input_tax_refunds"])]},
+            {"cells": ["Net QST", _money(qst["net"])], "style": "subtotal"},
+        ]
+    rows += [{"cells": [note, ""], "style": "note"} for note in data.get("notes", [])]
+    return {
+        "title": "GST/HST Return",
+        "period": f"{data['start_date']} to {data['end_date']}",
+        "columns": ["Line", "Amount"],
+        "rows": rows,
+    }
+
+
+@router.get("/gst-hst-return/pdf")
+def gst_hst_return_pdf(
+    start_date: date = Query(default=None),
+    end_date: date = Query(default=None),
+    line_104: Optional[Decimal] = _ENTERED["104"],
+    line_107: Optional[Decimal] = _ENTERED["107"],
+    line_110: Optional[Decimal] = _ENTERED["110"],
+    line_111: Optional[Decimal] = _ENTERED["111"],
+    db: Session = Depends(get_db),
+):
+    from app.routes.reports.financial import _pdf_response
+
+    data = _gst_hst_return(
+        db, start_date, end_date, line_104, line_107, line_110, line_111
+    )
+    return _pdf_response(
+        [_gst_hst_section(data)],
+        db,
+        f"gst-hst-return_{data['start_date']}_{data['end_date']}.pdf",
+    )
+
+
+@router.get("/gst-hst-return/csv")
+def gst_hst_return_csv(
+    request: Request,
+    start_date: date = Query(default=None),
+    end_date: date = Query(default=None),
+    line_104: Optional[Decimal] = _ENTERED["104"],
+    line_107: Optional[Decimal] = _ENTERED["107"],
+    line_110: Optional[Decimal] = _ENTERED["110"],
+    line_111: Optional[Decimal] = _ENTERED["111"],
+    db: Session = Depends(get_db),
+):
+    from app.routes.reports.financial import _company_name, _csv_download
+    from app.services.gst_hst_return import gst_hst_return_csv as to_csv
+
+    data = _gst_hst_return(
+        db, start_date, end_date, line_104, line_107, line_110, line_111
+    )
+    return _csv_download(
+        to_csv(data, _company_name(db)),
+        f"gst-hst-return_{data['start_date']}_{data['end_date']}.csv",
+        request,
+    )
 
 
 def ap_aging_report(db: Session, as_of_date: date) -> dict:

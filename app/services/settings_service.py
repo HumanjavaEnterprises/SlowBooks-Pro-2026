@@ -223,6 +223,47 @@ _ACH_ID_SETTINGS = {
 }
 _ALNUM = re.compile(r"[0-9A-Za-z]+")
 
+# The CRA's GST/HST number is the 9-digit business number, the RT program
+# and a 4-digit account; Revenu Québec's QST number is 10 digits, TQ and 4
+# digits. Spaces and dashes are how they are often printed, so they are
+# taken out before the check and the number is stored in one piece.
+_REGISTRATION_NUMBERS = {
+    "gst_hst_registration_number": (
+        re.compile(r"[0-9]{9}RT[0-9]{4}"),
+        "GST/HST registration number must be the 9-digit business number, RT "
+        "and the 4-digit account number, like 123456789RT0001.",
+    ),
+    "qst_registration_number": (
+        re.compile(r"[0-9]{10}TQ[0-9]{4}"),
+        "QST registration number must be 10 digits, TQ and 4 digits, like "
+        "1234567890TQ0001.",
+    ),
+}
+_NUMBER_SEPARATORS = re.compile(r"[\s-]+")
+
+# Asked of a Canadian company only. A US company's settings read exactly
+# as they did before there was a tax country (docs/design/canada.md).
+CANADA_SETTINGS_KEYS = (
+    "tax_province",
+    "gst_hst_registration_number",
+    "qst_registration_number",
+)
+
+
+def for_country(settings: dict) -> dict:
+    """The settings as the company's country shows them: without the tax
+    country and the Canadian keys unless the country is Canada."""
+    if settings.get("tax_country") == "CA":
+        return settings
+    hidden = ("tax_country", *CANADA_SETTINGS_KEYS)
+    return {k: v for k, v in settings.items() if k not in hidden}
+
+
+def is_canadian(db: Session) -> bool:
+    """True when the company collects Canadian sales tax (Settings ->
+    tax_country)."""
+    return get_setting_raw(db, "tax_country") == "CA"
+
 
 class SettingValueError(ValueError):
     """A setting value a person has to correct; str() is the sentence to
@@ -282,6 +323,22 @@ def clean_setting_value(key: str, value) -> str:
                 "as the bank assigned it."
             )
         return text
+    if key in _REGISTRATION_NUMBERS:
+        pattern, message = _REGISTRATION_NUMBERS[key]
+        number = _NUMBER_SEPARATORS.sub("", text).upper()
+        if number and not pattern.fullmatch(number):
+            raise SettingValueError(message)
+        return number
+    if key == "tax_province":
+        from app.services.canada_tax import PROVINCES
+
+        code = text.upper()
+        if code and code not in PROVINCES:
+            raise SettingValueError(
+                "Province must be the two-letter code of a province or "
+                f"territory: {', '.join(PROVINCES)}."
+            )
+        return code
     if key in _DATE_SETTINGS:
         if text == "":
             return ""

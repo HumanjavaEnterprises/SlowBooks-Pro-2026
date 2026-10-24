@@ -62,15 +62,31 @@ const TERMS_NONPROFIT = {
     "Revenue by Customer": "Revenue & Support by Donor"
 };
 
+/**
+ * A Canadian company's address and tax-number labels (Settings -> tax
+ * country Canada). T() swaps exact labels only, never inside a sentence:
+ * "State" is also a US payroll tax, and those pages stay American. Parsed
+ * as JSON by tests/test_terminology.py against app/services/terminology.py.
+ */
+const TERMS_CANADA = {
+    "State": "Province",
+    "ZIP": "Postal Code",
+    "Tax ID / EIN": "Business Number (BN)"
+};
+
 const Terms = {
     mode: 'business',
+    country: 'US',
     _re: null,
 
     init(settings) {
         Terms.mode = (settings && settings.company_type === 'nonprofit') ? 'nonprofit' : 'business';
+        Terms.country = (settings && settings.tax_country === 'CA') ? 'CA' : 'US';
     },
 
     isNonprofit() { return Terms.mode === 'nonprofit'; },
+
+    isCanadian() { return Terms.country === 'CA'; },
 
     _dict() { return Terms.mode === 'nonprofit' ? TERMS_NONPROFIT : null; },
 
@@ -104,6 +120,7 @@ const Terms = {
 
 /** T('Invoice') -> 'Pledge' in nonprofit mode; the key itself otherwise. */
 function T(key) {
+    if (Terms.country === 'CA' && Object.prototype.hasOwnProperty.call(TERMS_CANADA, key)) return TERMS_CANADA[key];
     const d = Terms._dict();
     if (!d || !key) return key;
     if (key in d) return d[key];
