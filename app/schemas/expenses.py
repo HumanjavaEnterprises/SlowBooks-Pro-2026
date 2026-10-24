@@ -23,6 +23,12 @@ class ExpenseCreate(StrictModel):
     cost_code_id: Optional[int] = None
     function: Optional[str] = None  # nonprofit: program | management | fundraising
     is_billable: bool = False
+    # A tax code splits the total (tax included, as a receipt prints it):
+    # its recoverable components are claimed back to their own accounts.
+    # tax_amount is the receipt's own tax figure, when it differs from the
+    # code's rate backed out of the total by a cent.
+    tax_code_id: Optional[int] = None
+    tax_amount: Optional[Decimal] = None
 
 
 class ExpenseResponse(BaseModel):

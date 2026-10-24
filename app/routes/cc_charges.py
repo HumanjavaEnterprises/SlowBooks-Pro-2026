@@ -14,6 +14,7 @@ from app.schemas.cc_charges import CCChargeCreate
 from app.services.accounting import create_journal_entry, get_cc_account_id
 from app.services.bank_posting import void_document
 from app.services.bank_register import voided_transaction_ids
+from app.services import tax_codes
 from app.services.closing_date import check_closing_date
 from app.models.transactions import Transaction
 
@@ -38,7 +39,10 @@ def list_cc_charges(db: Session = Depends(get_db)):
     )
     results = []
     for txn in txns:
-        expense_line = next((ln for ln in txn.lines if ln.debit > 0), None)
+        expense_line = next(
+            (ln for ln in txn.lines if ln.debit > 0 and ln.tax_component_id is None),
+            None,
+        )
         card_line = next((ln for ln in txn.lines if ln.credit > 0), None)
         results.append(
             {
@@ -47,7 +51,8 @@ def list_cc_charges(db: Session = Depends(get_db)):
                 "date": txn.date.isoformat(),
                 "description": txn.description or "",
                 "reference": txn.reference or "",
-                "amount": float(expense_line.debit) if expense_line else 0,
+                # the charge, tax included: the card side
+                "amount": float(card_line.credit) if card_line else 0,
                 "account_name": (
                     names.get(expense_line.account_id, "") if expense_line else ""
                 ),
@@ -87,10 +92,19 @@ def create_cc_charge(data: CCChargeCreate, db: Session = Depends(get_db)):
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be positive")
 
+    # With a tax code, the charge is split as a paid expense is: recoverable
+    # tax to its own account, the rest to the expense account.
+    tax_code = tax_codes.resolve(db, data.tax_code_id)
+    cost, recoverable = amount, []
+    if tax_code is not None:
+        _tax, recoverable, cost = tax_codes.inclusive_purchase_split(
+            tax_code, amount, data.tax_amount
+        )
+
     journal_lines = [
         {
             "account_id": data.account_id,
-            "debit": amount,
+            "debit": cost,
             "credit": Decimal("0"),
             "description": data.memo or data.payee or "",
             **(
@@ -99,6 +113,7 @@ def create_cc_charge(data: CCChargeCreate, db: Session = Depends(get_db)):
                 else {}
             ),
         },
+        *tax_codes.recoverable_tax_lines(recoverable),
         {
             "account_id": cc_account_id,
             "debit": Decimal("0"),

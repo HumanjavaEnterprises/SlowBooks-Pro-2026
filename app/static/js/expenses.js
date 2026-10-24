@@ -61,6 +61,7 @@ const ExpensesPage = {
         ExpensesPage._accounts = accounts;
         const classGroup = await classFormGroupHtml();
         const jobGroup = await jobFormGroupHtml(null);
+        await TaxCodes.load();
         await CostCodes.load();
         const costCodeGroup = CostCodes.any() ? `<div class="form-group"><label>Cost Code</label><select name="cost_code_id">${CostCodes.optionsHtml(null)}</select></div>` : '';
         const billableGroup = `<div class="form-group"><label>Billable</label><label style="font-weight:normal;"><input type="checkbox" name="is_billable"> Bill this cost to the job's customer</label></div>`;
@@ -85,6 +86,7 @@ const ExpensesPage = {
                         <select name="paid_from_account_id" required>${paidFrom.map(acctOpt).join('')}</select></div>
                     <div class="form-group"><label>Amount *</label>
                         <input name="amount" type="number" step="0.01" min="0.01" required></div>
+                    ${TaxCodes.receiptGroupHtml()}
                     <div class="form-group"><label>Reference</label>
                         <input name="reference" placeholder="Receipt / check #"></div>
                     ${classGroup}${Nonprofit.functionFormGroupHtml()}${jobGroup}${costCodeGroup}${billableGroup}
@@ -199,6 +201,7 @@ const ExpensesPage = {
                 job_id: jobIdFromForm(form),
                 cost_code_id: form.cost_code_id ? (form.cost_code_id.value ? parseInt(form.cost_code_id.value) : null) : null,
                 is_billable: !!(form.is_billable && form.is_billable.checked),
+                ...TaxCodes.receiptPayload(form),
             });
             await ScanHelper.attachAfterSave('expense', result.id);
             toast('Expense recorded');

@@ -16,6 +16,7 @@ from app.models.transactions import Transaction
 from app.schemas.expenses import ExpenseCreate, ExpenseResponse
 from app.services.accounting import create_journal_entry, reversing_lines
 from app.services.bank_posting import assert_not_reconciled, release_statement_links
+from app.services import tax_codes
 from app.services.closing_date import check_closing_date
 
 router = APIRouter(prefix="/api/expenses", tags=["expenses"])
@@ -47,7 +48,11 @@ def _serialize(
 ) -> ExpenseResponse:
     if voided is None:
         voided = txn.id in _void_ids(db, [txn.id])
-    debit_line = next((ln for ln in txn.lines if ln.debit > 0), None)
+    # the expense line, not a tax line a tax code split off it
+    debit_line = next(
+        (ln for ln in txn.lines if ln.debit > 0 and ln.tax_component_id is None),
+        None,
+    )
     credit_line = next((ln for ln in txn.lines if ln.credit > 0), None)
     vendor = (
         db.query(Vendor).filter(Vendor.id == txn.source_id).first()
@@ -67,7 +72,8 @@ def _serialize(
         paid_from_account_name=(
             credit_line.account.name if credit_line and credit_line.account else ""
         ),
-        amount=float(debit_line.debit) if debit_line else 0.0,
+        # what was paid, tax included: the paid-from side
+        amount=float(credit_line.credit) if credit_line else 0.0,
         reference=txn.reference or "",
         memo=(debit_line.description or "") if debit_line else "",
         status="void" if voided else "recorded",
@@ -178,10 +184,18 @@ def create_expense(data: ExpenseCreate, db: Session = Depends(get_db)):
     payee = (data.payee or "").strip() or (vendor.name if vendor else "")
     memo = (data.memo or "").strip()
     line_desc = memo or payee
+    # With a tax code, the total is split: recoverable tax to its own
+    # account, the rest (cost and any tax not claimed back) to the expense.
+    tax_code = tax_codes.resolve(db, data.tax_code_id)
+    cost, recoverable = amount, []
+    if tax_code is not None:
+        _tax, recoverable, cost = tax_codes.inclusive_purchase_split(
+            tax_code, amount, data.tax_amount
+        )
     journal_lines = [
         {
             "account_id": expense_account.id,
-            "debit": amount,
+            "debit": cost,
             "credit": Decimal("0"),
             "description": line_desc,
             "cost_code_id": data.cost_code_id,
@@ -192,6 +206,7 @@ def create_expense(data: ExpenseCreate, db: Session = Depends(get_db)):
                 else {}
             ),
         },
+        *tax_codes.recoverable_tax_lines(recoverable),
         {
             "account_id": paid_from.id,
             "debit": Decimal("0"),

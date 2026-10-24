@@ -142,4 +142,27 @@ const TaxCodes = {
         const code = TaxCodes.selected(form);
         return { tax_code_id: code ? code.id : null };
     },
+
+    // A paid receipt (an expense, a card charge): its Amount is the total
+    // paid, tax included, so the picker splits that total rather than adding
+    // to it. The receipt's own tax figure, when typed, wins over the rate
+    // backed out of the total (they can differ by a cent). '' with no codes.
+    receiptGroupHtml() {
+        const offered = TaxCodes._codes.filter(c => !c.is_archived);
+        if (!offered.length) return '';
+        const opts = offered.map(c => TaxCodes._optionHtml(c, false)).join('');
+        return `<div class="form-group"><label>Tax Code</label>
+                <select name="tax_code_id" title="The Amount is the total paid, tax included"><option value="">None</option>${opts}</select></div>
+            <div class="form-group"><label>Tax on the receipt</label>
+                <input name="tax_amount" type="number" step="0.01" min="0" placeholder="Worked out from the code"
+                    title="The tax the receipt prints, if it differs from the code's rate by a cent"></div>`;
+    },
+
+    receiptPayload(form) {
+        if (!form || !form.querySelector('[name="tax_code_id"]')) return {};
+        const code = TaxCodes.selected(form);
+        const typed = form.querySelector('[name="tax_amount"]');
+        const tax = code && typed && typed.value !== '' ? parseFloat(typed.value) : null;
+        return { tax_code_id: code ? code.id : null, tax_amount: tax };
+    },
 };

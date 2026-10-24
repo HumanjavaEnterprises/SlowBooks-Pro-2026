@@ -46,6 +46,7 @@ const CCChargesPage = {
         ).join('');
         const classGroup = await classFormGroupHtml();
         const jobGroup = await jobFormGroupHtml(null);
+        await TaxCodes.load();
         const acctOpts = PurchaseAccounts.options(accounts);
 
         openModal('Enter Credit Card Charge', `
@@ -61,6 +62,7 @@ const CCChargesPage = {
                         <select name="card_account_id" required>${cardOpts}</select></div>
                     <div class="form-group"><label>Amount *</label>
                         <input name="amount" type="number" step="0.01" required></div>
+                    ${TaxCodes.receiptGroupHtml()}
                     <div class="form-group"><label>Reference</label>
                         <input name="reference"></div>
                     ${classGroup}${Nonprofit.functionFormGroupHtml()}${jobGroup}
@@ -90,6 +92,7 @@ const CCChargesPage = {
                 class_id: classIdFromForm(form),
                 ...Nonprofit.formPayload(form),
                 job_id: jobIdFromForm(form),
+                ...TaxCodes.receiptPayload(form),
             });
             toast('Credit card charge recorded');
             closeModal();

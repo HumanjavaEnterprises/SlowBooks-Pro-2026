@@ -22,7 +22,16 @@ from app.services.accounting import _q, get_sales_tax_account_id
 from app.services.purchase_posting import spread
 
 # The postings that claim tax back (and give it back): purchases.
-PURCHASE_SOURCES = ("bill", "bill_void", "vendor_credit", "vendor_credit_void")
+PURCHASE_SOURCES = (
+    "bill",
+    "bill_void",
+    "vendor_credit",
+    "vendor_credit_void",
+    "expense",
+    "expense_void",
+    "cc_charge",
+    "cc_charge_void",
+)
 
 # Every table that carries tax_code_id, for "is this code in use?"
 DOCUMENT_MODELS = (
@@ -341,3 +350,28 @@ def any_document_taxed_by_code(db: Session) -> bool:
         if db.query(model.id).filter(model.tax_code_id.isnot(None)).first():
             return True
     return False
+
+
+def inclusive_purchase_split(code: TaxCode, total, tax_amount=None):
+    """Split a receipt's total, tax included, the way a paid expense or a
+    card charge is entered: (tax in the total, recoverable components with
+    their amounts, the rest of the total for the expense line). The tax is
+    backed out at the code's combined rate unless the receipt's own figure
+    is given, which is shared over the components by rate when it differs
+    from theirs. Recoverable tax is claimed back; the rest is part of what
+    the purchase cost, as on a bill."""
+    total = _q(total)
+    rate = effective_rate(code)
+    if tax_amount is None:
+        tax = _q(total - total / (1 + rate)) if rate else Decimal("0.00")
+    else:
+        tax = _q(tax_amount)
+    if tax < 0 or tax >= total and total > 0:
+        raise HTTPException(
+            status_code=400,
+            detail="The tax on a receipt is part of its total, so it has to be "
+            "less than the total",
+        )
+    recoverable, _rest = purchase_tax_split(code, total - tax, tax)
+    claimed = sum((amount for _, amount in recoverable), Decimal("0"))
+    return tax, recoverable, _q(total - claimed)
