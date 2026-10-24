@@ -21,9 +21,11 @@ from app.services.accounting import (
     _q,
     create_journal_entry,
     compute_line_totals,
+    taxable_subtotal,
     get_ap_account_id,
     reversing_lines,
 )
+from app.services import tax_codes
 from app.services.audit import audited_bulk_delete
 from app.services.closing_date import check_closing_date
 from app.services.request_utils import content_disposition
@@ -183,8 +185,15 @@ def _post_bill_lines(
     # and the JE debit lands on the same cents as the rounded AP credit.
     amounts = [_q(Decimal(str(ln.quantity)) * Decimal(str(ln.rate))) for ln in lines]
     # Tax on a purchase is part of what the lines cost: each line's debit
-    # carries its share, and nothing is posted to Sales Tax Payable.
-    tax_shares = spread(tax_amount, amounts)
+    # carries its share, and nothing is posted to Sales Tax Payable. A
+    # tax code's recoverable components are the exception: claimed back,
+    # they post to their own account and are no part of the cost.
+    recoverable, cost_tax = tax_codes.purchase_tax_split(
+        tax_codes.resolve(db, bill.tax_code_id, for_new=False),
+        taxable_subtotal(lines),
+        tax_amount,
+    )
+    tax_shares = spread(cost_tax, amounts)
 
     journal_lines = []
     for i, line_data in enumerate(lines):
@@ -277,6 +286,9 @@ def _post_bill_lines(
                 }
             )
 
+    if journal_lines:
+        journal_lines.extend(tax_codes.recoverable_tax_lines(recoverable))
+
     # Credit AP
     if ap_id and journal_lines:
         journal_lines.append(
@@ -359,7 +371,9 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
         terms = vendor.terms or "Net 30"
     due_date = data.due_date or _due_date_from_terms(data.date, terms)
 
-    subtotal, tax_amount, total = compute_line_totals(data.lines, data.tax_rate)
+    tax_code = tax_codes.resolve(db, data.tax_code_id)
+    tax_rate = tax_codes.document_rate(tax_code, data.tax_rate)
+    subtotal, tax_amount, total = compute_line_totals(data.lines, tax_rate, tax_code)
     if total <= 0:
         raise HTTPException(
             status_code=400,
@@ -384,7 +398,8 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
         ref_number=data.ref_number,
         po_id=data.po_id,
         subtotal=subtotal,
-        tax_rate=data.tax_rate,
+        tax_rate=tax_rate,
+        tax_code_id=tax_code.id if tax_code else None,
         tax_amount=tax_amount,
         total=total,
         balance_due=total,
@@ -483,7 +498,9 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
             db, currency, rate
         )
 
+    tax_code = tax_codes.code_for_edit(db, bill, update_data)
     repost_fields = {
+        "tax_code_id",
         "tax_rate",
         "currency",
         "exchange_rate",
@@ -530,8 +547,10 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
             effective_lines.append(BillLineCreate.model_construct(**fields))
     amount_paid = bill.amount_paid or Decimal("0")
     if needs_repost:
-        tax_rate = data.tax_rate if data.tax_rate is not None else bill.tax_rate
-        subtotal, tax_amount, total = compute_line_totals(effective_lines, tax_rate)
+        tax_rate = update_data.get("tax_rate", bill.tax_rate)
+        subtotal, tax_amount, total = compute_line_totals(
+            effective_lines, tax_rate, tax_code
+        )
         if total <= 0:
             raise HTTPException(
                 status_code=400,

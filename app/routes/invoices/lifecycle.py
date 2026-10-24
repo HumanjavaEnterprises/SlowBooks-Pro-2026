@@ -86,6 +86,7 @@ def void_invoice(invoice_id: int, db: Session = Depends(get_db)):
                     "debit": ol.credit,  # swap debit/credit
                     "credit": ol.debit,
                     "description": void_line_memo(ol.description),
+                    "tax_component_id": ol.tax_component_id,
                 }
             )
         if reverse_lines:
@@ -518,6 +519,7 @@ def duplicate_invoice(
     booked $935), and it dropped the job and every line's job, class and
     cost code, so the copy was missing from job costing (found integrating
     the 2.17.3 exploratory fixes)."""
+    from app.services import tax_codes
     from app.services.accounting import compute_line_totals, taxed_copy_lines
     from app.services.inventory_hooks import post_sale_for_invoice
 
@@ -528,7 +530,12 @@ def duplicate_invoice(
 
     today = date.today()
     copied = taxed_copy_lines(original.lines, original.customer)
-    subtotal, tax_amount, total = compute_line_totals(copied, original.tax_rate)
+    # The copy keeps the original's tax code, archived or not: it is the
+    # same document again, and the copy's code can be changed like any other.
+    tax_code = tax_codes.resolve(db, original.tax_code_id, for_new=False)
+    subtotal, tax_amount, total = compute_line_totals(
+        copied, original.tax_rate, tax_code
+    )
     noun = document_label(original, words).lower()
     confirm_zero_total(
         total,
@@ -559,6 +566,7 @@ def duplicate_invoice(
         ship_zip=original.ship_zip,
         subtotal=subtotal,
         tax_rate=original.tax_rate,
+        tax_code_id=original.tax_code_id,
         tax_amount=tax_amount,
         total=total,
         balance_due=total,

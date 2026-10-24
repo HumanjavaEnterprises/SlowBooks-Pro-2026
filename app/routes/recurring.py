@@ -13,6 +13,7 @@ from app.routes.invoices.helpers import refuse_zero_total, resolve_line_taxable
 from app.models.recurring import RecurringInvoice, RecurringInvoiceLine
 from app.models.contacts import Customer
 from app.schemas.recurring import RecurringCreate, RecurringUpdate, RecurringResponse
+from app.services import tax_codes
 from app.services.accounting import compute_line_totals
 from app.services.jobs_service import (
     refuse_other_customers_jobs,
@@ -82,8 +83,10 @@ def create_recurring(data: RecurringCreate, db: Session = Depends(get_db)):
     # Refused here rather than skipped at every run: a template that adds up
     # to nothing generated $0.00 invoices that then showed as overdue.
     resolve_line_taxable(db, data.lines, customer)
+    tax_code = tax_codes.resolve(db, data.tax_code_id)
+    tax_rate = tax_codes.document_rate(tax_code, data.tax_rate)
     refuse_zero_total(
-        compute_line_totals(data.lines, data.tax_rate)[2], _schedule_noun(db)
+        compute_line_totals(data.lines, tax_rate, tax_code)[2], _schedule_noun(db)
     )
 
     rec = RecurringInvoice(
@@ -93,7 +96,8 @@ def create_recurring(data: RecurringCreate, db: Session = Depends(get_db)):
         end_date=data.end_date,
         next_due=data.start_date,
         terms=data.terms,
-        tax_rate=data.tax_rate,
+        tax_rate=tax_rate,
+        tax_code_id=tax_code.id if tax_code else None,
         notes=data.notes,
         class_id=data.class_id,
         job_id=data.job_id,
@@ -136,12 +140,14 @@ def update_recurring(rec_id: int, data: RecurringUpdate, db: Session = Depends(g
     # A changed job must be the schedule's customer's (NEW-36); a job sent
     # unchanged, or left alone, is not judged (the lines carry none).
     refuse_other_customers_jobs_on_edit(db, rec, changes, None, _schedule_noun(db))
+    tax_code = tax_codes.code_for_edit(db, rec, changes)
 
     if data.lines is not None:
         resolve_line_taxable(db, data.lines, rec.customer)
-        tax_rate = data.tax_rate if data.tax_rate is not None else rec.tax_rate
+        tax_rate = changes.get("tax_rate", rec.tax_rate)
         refuse_zero_total(
-            compute_line_totals(data.lines, tax_rate)[2], _schedule_noun(db)
+            compute_line_totals(data.lines, tax_rate, tax_code)[2],
+            _schedule_noun(db),
         )
 
     for key, val in changes.items():

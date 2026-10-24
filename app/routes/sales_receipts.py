@@ -24,6 +24,7 @@ from app.routes.payments import create_payment
 from app.schemas.invoices import InvoiceCreate, InvoiceResponse
 from app.schemas.payments import PaymentAllocationCreate, PaymentCreate
 from app.schemas.sales_receipts import SalesReceiptCreate, SalesReceiptResponse
+from app.services import tax_codes
 from app.services.donor_documents import document_label
 from app.services.jobs_service import refuse_other_customers_jobs
 from app.services.terminology import terms_from_db
@@ -88,7 +89,8 @@ def create_sales_receipt(data: SalesReceiptCreate, db: Session = Depends(get_db)
     # would reject after the invoice already exists: a $0 payment is
     # refused by the payments route, and a bad deposit account would only
     # surface when its journal posts.
-    _, _, total = _compute_totals(data.lines, data.tax_rate)
+    tax_code = tax_codes.resolve(db, data.tax_code_id)
+    _, _, total = _compute_totals(data.lines, data.tax_rate, tax_code)
     if total <= 0:
         raise HTTPException(
             status_code=400,
@@ -128,6 +130,7 @@ def create_sales_receipt(data: SalesReceiptCreate, db: Session = Depends(get_db)
             due_date=data.date,
             terms="Due on Receipt",
             tax_rate=data.tax_rate,
+            tax_code_id=data.tax_code_id,
             notes=data.notes,
             class_id=data.class_id,
             job_id=data.job_id,

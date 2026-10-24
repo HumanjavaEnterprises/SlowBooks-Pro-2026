@@ -33,6 +33,8 @@ class RecurringInvoice(Base):
 
     terms = Column(String(50), default="Net 30")
     tax_rate = Column(Numeric(7, 6), default=0)  # a fraction: 8.875% is 0.08875
+    # None = the single rate above, posted to Sales Tax Payable
+    tax_code_id = Column(Integer, ForeignKey("tax_codes.id"), nullable=True)
     notes = Column(Text, nullable=True)
     invoices_created = Column(Integer, default=0)
 

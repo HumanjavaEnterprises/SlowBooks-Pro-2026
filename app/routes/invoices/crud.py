@@ -14,6 +14,7 @@ from app.schemas.invoices import InvoiceCreate, InvoiceUpdate, InvoiceResponse
 from app.services.accounting import (
     _q,
 )
+from app.services import tax_codes
 from app.services.numbering import next_invoice_number
 from app.services.closing_date import check_closing_date
 
@@ -132,7 +133,9 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
     refuse_due_before_date(data.date, due_date)
     refuse_negative_lines(db, data.lines)
     resolve_line_taxable(db, data.lines, customer)
-    subtotal, tax_amount, total = _compute_totals(data.lines, data.tax_rate)
+    tax_code = tax_codes.resolve(db, data.tax_code_id)
+    tax_rate = tax_codes.document_rate(tax_code, data.tax_rate)
+    subtotal, tax_amount, total = _compute_totals(data.lines, tax_rate, tax_code)
     confirm_zero_total(total, data.allow_zero_total, noun)
     _check_fair_value(data.fair_value_amount, total)
 
@@ -184,7 +187,8 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
             terms=data.terms,
             po_number=data.po_number,
             subtotal=subtotal,
-            tax_rate=data.tax_rate,
+            tax_rate=tax_rate,
+            tax_code_id=tax_code.id if tax_code else None,
             tax_amount=tax_amount,
             total=total,
             balance_due=total,
@@ -328,7 +332,9 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
             db, currency, rate
         )
 
+    tax_code = tax_codes.code_for_edit(db, invoice, update_data)
     repost_fields = {
+        "tax_code_id",
         "tax_rate",
         "currency",
         "exchange_rate",
@@ -359,8 +365,10 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
                 resolve_line_taxable(
                     db, effective_lines, db.get(Customer, new_customer_id)
                 )
-        tax_rate = data.tax_rate if data.tax_rate is not None else invoice.tax_rate
-        subtotal, tax_amount, total = _compute_totals(effective_lines, tax_rate)
+        tax_rate = update_data.get("tax_rate", invoice.tax_rate)
+        subtotal, tax_amount, total = _compute_totals(
+            effective_lines, tax_rate, tax_code
+        )
         kept = kept_tax(invoice, tax_rate, effective_lines)
         if kept is not None:
             tax_amount, total = kept, _q(subtotal + kept)

@@ -16,6 +16,7 @@ from app.models.invoices import InvoiceStatus
 from app.models.items import Item
 from app.services.accounting import (
     compute_line_totals,
+    taxable_subtotal,
     _q,
 )
 from app.services.terminology import document_reference
@@ -254,10 +255,11 @@ def kept_tax(invoice, tax_rate, lines):
     return Decimal(str(invoice.tax_amount))
 
 
-def _compute_totals(lines_data, tax_rate):
+def _compute_totals(lines_data, tax_rate, tax_code=None):
     """Tax applies to the lines flagged taxable (QuickBooks-style per-line
-    tax); the rate itself stays on the document."""
-    return compute_line_totals(lines_data, tax_rate)
+    tax); the rate itself stays on the document. A tax code taxes them per
+    component."""
+    return compute_line_totals(lines_data, tax_rate, tax_code)
 
 
 def _build_invoice_journal_lines(
@@ -270,11 +272,14 @@ def _build_invoice_journal_lines(
     lines_iter,
     invoice_number,
     face: str = "Invoice",
+    tax_lines=None,
 ):
     """Build the journal-line list for an invoice. Used by create/update/duplicate.
 
     `lines_iter` yields objects with .quantity, .rate, and .item_id.
     `face` is the document's own name (donor_documents.document_label).
+    `tax_lines`, when given, are the invoice's tax postings (one per tax-code
+    component) in place of the single line to `tax_account_id`.
     """
     journal_lines = []
     journal_lines.append(
@@ -311,7 +316,9 @@ def _build_invoice_journal_lines(
                 "cost_code_id": getattr(ld, "cost_code_id", None),
             }
         )
-    if tax_amount and tax_amount > 0 and tax_account_id:
+    if tax_lines is not None:
+        journal_lines.extend(tax_lines)
+    elif tax_amount and tax_amount > 0 and tax_account_id:
         journal_lines.append(
             {
                 "account_id": tax_account_id,
@@ -351,17 +358,28 @@ def _post_invoice_journal(
     from app.services.donor_documents import document_label
     from app.services.terminology import terms_from_db
 
+    from app.services import tax_codes
+
     face = document_label(invoice, terms_from_db(db))
+    tax_code = tax_codes.resolve(db, invoice.tax_code_id, for_new=False)
+    lines = list(lines)
     journal_lines = _build_invoice_journal_lines(
         db,
         invoice.total,
         invoice.tax_amount,
-        get_sales_tax_account_id(db),
+        get_sales_tax_account_id(db) if tax_code is None else None,
         get_ar_account_id(db),
         get_default_income_account_id(db),
         lines,
         invoice.invoice_number,
         face=face,
+        tax_lines=(
+            None
+            if tax_code is None
+            else tax_codes.sales_tax_lines(
+                db, tax_code, taxable_subtotal(lines), invoice.tax_amount
+            )
+        ),
     )
     if balance_on_income:
         short = sum(line["debit"] for line in journal_lines) - sum(

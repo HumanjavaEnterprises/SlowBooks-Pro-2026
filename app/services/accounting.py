@@ -43,13 +43,17 @@ def _q(value) -> Decimal:
 quantize_cents = _q
 
 
-def compute_line_totals(lines, tax_rate) -> tuple[Decimal, Decimal, Decimal]:
+def compute_line_totals(
+    lines, tax_rate, tax_code=None
+) -> tuple[Decimal, Decimal, Decimal]:
     """Return (subtotal, tax_amount, total), each quantized to 2 decimals.
 
     `lines` is any iterable of objects with .quantity and .rate attributes.
     Rounds each line's amount before summing so per-line DB storage matches the
     sum (prevents drift between stored invoice.total and DB-rounded journal
-    lines).
+    lines). With a `tax_code`, each of its components is taxed and rounded on
+    its own and the tax is their sum (app/services/tax_codes.py posts the
+    same amounts); `tax_rate` is then ignored.
     """
     lines = list(lines)
     subtotal = _q(
@@ -61,7 +65,16 @@ def compute_line_totals(lines, tax_rate) -> tuple[Decimal, Decimal, Decimal]:
             Decimal("0"),
         )
     )
-    tax_amount = _q(taxable_subtotal(lines) * Decimal(str(tax_rate or 0)))
+    base = taxable_subtotal(lines)
+    if tax_code is not None:
+        tax_amount = _q(
+            sum(
+                (_q(base * Decimal(str(c.rate or 0))) for c in tax_code.components),
+                Decimal("0"),
+            )
+        )
+    else:
+        tax_amount = _q(base * Decimal(str(tax_rate or 0)))
     total = _q(subtotal + tax_amount)
     return subtotal, tax_amount, total
 
@@ -152,7 +165,7 @@ def void_line_memo(description: str | None) -> str:
 def reversing_lines(lines) -> list[dict]:
     """Mirror-image line dicts for a void: debit and credit swapped, the
     description prefixed VOID:, and every dimension (job, class, cost code,
-    cost type, function) carried over so the by-class, by-job and
+    cost type, function, tax component) carried over so the by-class, by-job and
     functional reports net to zero for the voided document instead of
     leaving the tag on one side."""
     return [
@@ -166,6 +179,7 @@ def reversing_lines(lines) -> list[dict]:
             "cost_code_id": ol.cost_code_id,
             "cost_type": ol.cost_type,
             "function": ol.function,
+            "tax_component_id": getattr(ol, "tax_component_id", None),
         }
         for ol in lines
     ]
@@ -351,6 +365,7 @@ def create_journal_entry(
             cost_type=line_data.get("cost_type")
             or _cost_type_of(db, line_data.get("cost_code_id")),
             is_billable=bool(line_data.get("is_billable", False)),
+            tax_component_id=line_data.get("tax_component_id"),
         )
         db.add(txn_line)
 

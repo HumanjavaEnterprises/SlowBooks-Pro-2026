@@ -60,6 +60,7 @@ class EstimateCreate(StrictModel):
     date: dt_date
     expiration_date: Optional[dt_date] = None
     tax_rate: TaxRate = Decimal("0")
+    tax_code_id: Optional[int] = None  # None = the single tax_rate above
     notes: Optional[str] = None
     class_id: Optional[int] = None
     job_id: Optional[int] = None
@@ -79,6 +80,7 @@ class EstimateUpdate(StrictModel):
     expiration_date: Optional[dt_date] = None
     status: Optional[EstimateStatus] = None
     tax_rate: Optional[TaxRate] = None
+    tax_code_id: Optional[int] = None  # None = the single tax_rate above
     notes: Optional[str] = None
     class_id: Optional[int] = None
     job_id: Optional[int] = None
@@ -94,6 +96,7 @@ class EstimateResponse(BaseModel):
     expiration_date: Optional[dt_date]
     subtotal: Decimal
     tax_rate: TaxRateOut
+    tax_code_id: Optional[int] = None  # None = the single tax_rate above
     tax_amount: Decimal
     total: Decimal
     notes: Optional[str]

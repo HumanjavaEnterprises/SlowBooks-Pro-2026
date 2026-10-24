@@ -98,6 +98,7 @@ class InvoiceCreate(StrictModel):
     ship_state: Optional[str] = None
     ship_zip: Optional[str] = None
     tax_rate: TaxRate = Decimal("0")
+    tax_code_id: Optional[int] = None  # None = the single tax_rate above
     notes: Optional[str] = None
     class_id: Optional[int] = None
     job_id: Optional[int] = None
@@ -131,6 +132,7 @@ class InvoiceUpdate(StrictModel):
     po_number: Optional[str] = None
     status: Optional[InvoiceStatus] = None
     tax_rate: Optional[TaxRate] = None
+    tax_code_id: Optional[int] = None  # None = the single tax_rate above
     notes: Optional[str] = None
     class_id: Optional[int] = None
     job_id: Optional[int] = None
@@ -176,6 +178,7 @@ class InvoiceResponse(BaseModel):
     ship_zip: Optional[str]
     subtotal: Decimal
     tax_rate: TaxRateOut
+    tax_code_id: Optional[int] = None  # None = the single tax_rate above
     tax_amount: Decimal
     total: Decimal
     amount_paid: Decimal

@@ -62,6 +62,7 @@ class VendorCreditCreate(StrictModel):
     original_bill_id: Optional[int] = None
     ref_number: Optional[str] = None
     tax_rate: TaxRateFloat = 0
+    tax_code_id: Optional[int] = None  # None = the single tax_rate above
     notes: Optional[str] = None
     class_id: Optional[int] = None
     job_id: Optional[int] = None
@@ -86,6 +87,7 @@ class VendorCreditResponse(BaseModel):
     date: dt_date
     subtotal: Decimal = Decimal("0")
     tax_rate: TaxRateOut = Decimal("0")
+    tax_code_id: Optional[int] = None  # None = the single tax_rate above
     tax_amount: Decimal = Decimal("0")
     total: Decimal = Decimal("0")
     amount_applied: Decimal = Decimal("0")

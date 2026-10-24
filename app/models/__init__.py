@@ -53,6 +53,7 @@ from app.models.email_log import EmailLog
 
 # Phase 5: Advanced Integration
 from app.models.tax import TaxCategoryMapping
+from app.models.tax_codes import TaxCode, TaxCodeComponent  # noqa: F401
 from app.models.backups import Backup
 
 # Phase 6: Ambitious

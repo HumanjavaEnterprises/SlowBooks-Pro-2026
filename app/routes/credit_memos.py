@@ -33,8 +33,10 @@ from app.services.accounting import (
     get_default_income_account_id,
     get_sales_tax_account_id,
     compute_line_totals,
+    taxable_subtotal,
     _q,
 )
+from app.services import tax_codes
 from app.routes.invoices.helpers import confirm_zero_total, resolve_line_taxable
 from app.services.closing_date import check_closing_date
 from app.services.jobs_service import refuse_other_customers_jobs
@@ -142,6 +144,8 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
     # defaulted to 0%, so returned taxable goods were credited without
     # their tax unless the user remembered (2.17.3 exploratory W-L14, F14).
     tax_rate = data.tax_rate
+    tax_code_id = data.tax_code_id
+    original = None
     if data.original_invoice_id is not None:
         original = db.get(Invoice, data.original_invoice_id)
         if original is None:
@@ -154,15 +158,24 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
                     "customer than this credit memo."
                 ),
             )
-        if tax_rate is None:
+        if tax_rate is None and tax_code_id is None:
             tax_rate = original.tax_rate
+            tax_code_id = original.tax_code_id
     if tax_rate is None:
         tax_rate = 0
+    # The invoice's own code goes back the way it was charged, archived or
+    # not; any other code is chosen as for a new document.
+    tax_code = tax_codes.resolve(
+        db,
+        tax_code_id,
+        for_new=original is None or tax_code_id != original.tax_code_id,
+    )
+    tax_rate = tax_codes.document_rate(tax_code, tax_rate)
 
     # Tax follows the lines the way an invoice's does: an item's own flag,
     # and nothing at all for a non-taxable customer.
     resolve_line_taxable(db, data.lines, customer)
-    subtotal, tax_amount, total = compute_line_totals(data.lines, tax_rate)
+    subtotal, tax_amount, total = compute_line_totals(data.lines, tax_rate, tax_code)
     confirm_zero_total(total, data.allow_zero_total, "credit memo")
 
     cm = None
@@ -178,6 +191,7 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
             original_invoice_id=data.original_invoice_id,
             subtotal=subtotal,
             tax_rate=tax_rate,
+            tax_code_id=tax_code.id if tax_code else None,
             tax_amount=tax_amount,
             total=total,
             balance_remaining=total,
@@ -203,7 +217,7 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
 
     ar_id = get_ar_account_id(db)
     default_income_id = get_default_income_account_id(db)
-    tax_account_id = get_sales_tax_account_id(db)
+    tax_account_id = get_sales_tax_account_id(db) if tax_code is None else None
     journal_lines = []
 
     for i, line_data in enumerate(data.lines):
@@ -238,8 +252,19 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
                     }
                 )
 
-    # DR Sales Tax Payable if tax
-    if tax_amount > 0 and tax_account_id:
+    # DR each tax-code component's payable account, or Sales Tax Payable
+    if tax_code is not None:
+        journal_lines.extend(
+            tax_codes.sales_tax_lines(
+                db,
+                tax_code,
+                taxable_subtotal(data.lines),
+                tax_amount,
+                reverse=True,
+                description="Sales tax credit",
+            )
+        )
+    elif tax_amount > 0 and tax_account_id:
         journal_lines.append(
             {
                 "account_id": tax_account_id,

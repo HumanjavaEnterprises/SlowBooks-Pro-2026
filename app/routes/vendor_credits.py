@@ -42,7 +42,9 @@ from app.services.accounting import (
     create_journal_entry,
     get_ap_account_id,
     reversing_lines,
+    taxable_subtotal,
 )
+from app.services import tax_codes
 from app.services.inventory_service import get_inventory_asset_account_id
 from app.services.closing_date import check_closing_date
 from app.services.numbering import next_vendor_credit_number
@@ -114,7 +116,9 @@ def create_vendor_credit(data: VendorCreditCreate, db: Session = Depends(get_db)
                 detail="That bill belongs to a different vendor.",
             )
 
-    subtotal, tax_amount, total = compute_line_totals(data.lines, data.tax_rate)
+    tax_code = tax_codes.resolve(db, data.tax_code_id)
+    tax_rate = tax_codes.document_rate(tax_code, data.tax_rate)
+    subtotal, tax_amount, total = compute_line_totals(data.lines, tax_rate, tax_code)
     if total <= 0:
         raise HTTPException(
             status_code=400,
@@ -136,7 +140,8 @@ def create_vendor_credit(data: VendorCreditCreate, db: Session = Depends(get_db)
             original_bill_id=data.original_bill_id,
             ref_number=data.ref_number,
             subtotal=subtotal,
-            tax_rate=data.tax_rate,
+            tax_rate=tax_rate,
+            tax_code_id=tax_code.id if tax_code else None,
             tax_amount=tax_amount,
             total=total,
             balance_remaining=total,
@@ -170,8 +175,12 @@ def create_vendor_credit(data: VendorCreditCreate, db: Session = Depends(get_db)
     ]
     # The mirror of a bill: tax on a purchase was part of what the lines
     # cost, so the tax coming back reduces those same lines. It never
-    # credits Sales Tax Payable, which is the tax owed on sales.
-    tax_shares = spread(tax_amount, amounts)
+    # credits Sales Tax Payable, which is the tax owed on sales. A tax
+    # code's recoverable components come back off their own account.
+    recoverable, cost_tax = tax_codes.purchase_tax_split(
+        tax_code, taxable_subtotal(data.lines), tax_amount
+    )
+    tax_shares = spread(cost_tax, amounts)
 
     for i, line_data in enumerate(data.lines):
         amt = amounts[i]
@@ -249,6 +258,7 @@ def create_vendor_credit(data: VendorCreditCreate, db: Session = Depends(get_db)
                 }
             )
 
+    journal_lines.extend(tax_codes.recoverable_tax_lines(recoverable, reverse=True))
     ap_id = get_ap_account_id(db)
     journal_lines.append(
         {

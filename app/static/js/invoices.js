@@ -71,7 +71,11 @@ const SalesLines = {
             if (cell) cell.textContent = SalesLines.money(amount, currency);
         });
         subtotal = SalesLines.cents(subtotal);
-        const tax = SalesLines.tax(SalesLines.cents(taxable), taxPct);
+        // a tax code's components (an array of percents) are each taxed and
+        // rounded on their own, as the server does
+        const tax = Array.isArray(taxPct)
+            ? SalesLines.cents(taxPct.reduce((sum, pct) => sum + SalesLines.tax(SalesLines.cents(taxable), pct), 0))
+            : SalesLines.tax(SalesLines.cents(taxable), taxPct);
         return { subtotal, tax, total: SalesLines.cents(subtotal + tax) };
     },
 
@@ -623,6 +627,7 @@ const InvoicesPage = {
         InvoicesPage._editing = id ? { total: parseFloat(inv.total) || 0, paid: parseFloat(inv.amount_paid) || 0 } : null;
         const classGroup = await classFormGroupHtml(inv.class_id);
         const jobGroup = await jobFormGroupHtml(inv.job_id, 'inv-customer-select');
+        await TaxCodes.load();
         if (InvoicesPage.lineClasses()) await Nonprofit.loadFunds();
         // Nonprofit: a pledge prints as one; program fees and rentals stay invoices
         const pledgeGroup = Terms.isNonprofit() ? `<div class="form-group"><label>Document</label><label style="font-weight:normal;"><input type="checkbox" name="is_pledge" ${(id ? inv.is_pledge : true) ? 'checked' : ''}> This is a pledge (prints as PLEDGE)</label></div>` : '';
@@ -666,6 +671,7 @@ const InvoicesPage = {
                         <input name="po_number" value="${escapeHtml(inv.po_number || '')}"></div>
                     ${classGroup}${jobGroup}${pledgeGroup}
                     ${currencyFormGroupsHtml(inv.currency, inv.exchange_rate)}
+                    ${TaxCodes.groupHtml(inv.tax_code_id, 'InvoicesPage.recalc()')}
                     <div class="form-group"><label>Tax Rate (%)</label>
                         <input name="tax_rate" type="number" step="0.0001" value="${+((inv.tax_rate || 0) * 100).toFixed(4)}"
                             oninput="InvoicesPage.recalc()">
@@ -695,6 +701,7 @@ const InvoicesPage = {
                     <button type="submit" class="btn btn-primary" data-invoice-logo-action${id ? '' : ' aria-describedby="inv-create-note"'}>${id ? 'Update' : 'Create'} ${T('Invoice')}</button>
                 </div>
             </form>`);
+        TaxCodes.sync($('#invoice-form'));
         if (!id && inv.customer_id) InvoicesPage.customerSelected(inv.customer_id);
         // the totals carry the document's currency; follow a change of it
         $('#invoice-form [name="currency"]')?.addEventListener('change', () => InvoicesPage.recalc());
@@ -804,7 +811,7 @@ const InvoicesPage = {
         TaxExempt.enforce(InvoicesPage._customers, $('#inv-customer-select')?.value, $('#inv-lines'));
         const cur = $('#invoice-form [name="currency"]')?.value;
         const rate = $('#invoice-form [name="tax_rate"]')?.value;
-        const t = SalesLines.totals($('#inv-lines'), rate, cur);
+        const t = SalesLines.totals($('#inv-lines'), TaxCodes.taxPct($('#invoice-form'), rate), cur);
         const kept = InvoicesPage._keptTax;
         const taxable = $$('#inv-lines tr').some(row => row.querySelector('.line-taxable')?.checked !== false);
         const keeping = kept != null && !(parseFloat(rate) > 0) && taxable;
@@ -878,6 +885,7 @@ const InvoicesPage = {
             job_id: jobIdFromForm(form),
             ...currencyPayloadFromForm(form),
             tax_rate: (parseFloat(form.tax_rate.value) || 0) / 100,
+            ...TaxCodes.payload(form),
             notes: form.notes.value || null,
             lines,
         };

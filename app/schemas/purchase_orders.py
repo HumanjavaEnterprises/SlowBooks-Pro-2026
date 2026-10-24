@@ -52,6 +52,7 @@ class POCreate(StrictModel):
     expected_date: Optional[dt_date] = None
     ship_to: Optional[str] = None
     tax_rate: TaxRateFloat = 0
+    tax_code_id: Optional[int] = None  # None = the single tax_rate above
     notes: Optional[str] = None
     job_id: Optional[int] = None
     lines: list[POLineCreate] = []
@@ -71,6 +72,7 @@ class POUpdate(StrictModel):
     ship_to: Optional[str] = None
     status: Optional[str] = None
     tax_rate: Optional[TaxRateFloat] = None
+    tax_code_id: Optional[int] = None  # None = the single tax_rate above
     notes: Optional[str] = None
     job_id: Optional[int] = None
     lines: Optional[list[POLineCreate]] = None
@@ -101,6 +103,7 @@ class POResponse(BaseModel):
     ship_to: Optional[str] = None
     subtotal: Decimal = Decimal("0")
     tax_rate: TaxRateOut = Decimal("0")
+    tax_code_id: Optional[int] = None  # None = the single tax_rate above
     tax_amount: Decimal = Decimal("0")
     total: Decimal = Decimal("0")
     notes: Optional[str] = None

@@ -1,0 +1,77 @@
+from decimal import Decimal
+from typing import Optional
+
+from pydantic import BaseModel, Field, field_validator
+
+from app.schemas.common import StrictModel, TaxRate, TaxRateOut
+
+
+def _name(v, what):
+    v = (v or "").strip()
+    if not v:
+        raise ValueError(f"{what} is required")
+    return v
+
+
+class TaxCodeComponentIn(StrictModel):
+    name: str = Field(..., max_length=50)
+    rate: TaxRate
+    # None = Sales Tax Payable
+    payable_account_id: Optional[int] = None
+    is_recoverable: bool = False
+    recoverable_account_id: Optional[int] = None
+
+    @field_validator("name")
+    @classmethod
+    def name_not_blank(cls, v):
+        return _name(v, "A component's name")
+
+
+class TaxCodeCreate(StrictModel):
+    name: str = Field(..., max_length=100)
+    description: Optional[str] = None
+    components: list[TaxCodeComponentIn] = Field(..., min_length=1)
+
+    @field_validator("name")
+    @classmethod
+    def name_not_blank(cls, v):
+        return _name(v, "Tax code name")
+
+
+class TaxCodeUpdate(StrictModel):
+    name: Optional[str] = Field(None, max_length=100)
+    description: Optional[str] = None
+    is_archived: Optional[bool] = None
+    # The whole set, replacing the code's components: only while no
+    # document uses the code (a new rate is a new code).
+    components: Optional[list[TaxCodeComponentIn]] = Field(None, min_length=1)
+
+    @field_validator("name")
+    @classmethod
+    def name_not_blank(cls, v):
+        if v is None:
+            return v
+        return _name(v, "Tax code name")
+
+
+class TaxCodeComponentResponse(BaseModel):
+    id: int
+    name: str
+    rate: TaxRateOut
+    payable_account_id: Optional[int] = None
+    is_recoverable: bool
+    recoverable_account_id: Optional[int] = None
+
+    model_config = {"from_attributes": True}
+
+
+class TaxCodeResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    is_archived: bool
+    rate: TaxRateOut = Decimal("0")  # the components' rates together
+    in_use: bool = False
+    components: list[TaxCodeComponentResponse] = []
+
+    model_config = {"from_attributes": True}

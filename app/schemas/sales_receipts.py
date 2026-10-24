@@ -20,6 +20,7 @@ class SalesReceiptCreate(StrictModel):
     customer_id: Optional[int] = None
     date: dt_date
     tax_rate: TaxRate = Decimal("0")
+    tax_code_id: Optional[int] = None  # None = the single tax_rate above
     method: Optional[str] = None
     check_number: Optional[str] = None
     reference: Optional[str] = None

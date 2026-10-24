@@ -24,7 +24,10 @@ from app.services.accounting import (
     get_ar_account_id,
     get_default_income_account_id,
     get_sales_tax_account_id,
+    taxable_subtotal,
 )
+from app.models.tax_codes import TaxCode
+from app.services import tax_codes
 
 logger = logging.getLogger(__name__)
 
@@ -88,9 +91,29 @@ def generate_due_invoices(
         # line amounts, and journal credits land on the same cents as the
         # A/R debit once SQL rounds.
         tax_rate = rec.tax_rate or Decimal("0")
+        tax_code = rec.tax_code_id and db.get(TaxCode, rec.tax_code_id)
+        if tax_code and tax_code.is_archived:
+            # An archived code is a rate that no longer applies: a new
+            # invoice is not made at it.
+            if skipped is not None:
+                who = rec.customer.name if rec.customer else f"schedule {rec.id}"
+                skipped.append(
+                    {
+                        "recurring_id": rec.id,
+                        "customer_name": rec.customer.name if rec.customer else None,
+                        "message": (
+                            f"The schedule for {who} uses tax code "
+                            f"'{tax_code.name}', which is archived, so nothing "
+                            "was created. Open it and choose a current tax code."
+                        ),
+                    }
+                )
+            continue
         # the customer's CURRENT tax treatment, not the template's saved flags
         copied = taxed_copy_lines(rec.lines, rec.customer)
-        subtotal, tax_amount, total = compute_line_totals(copied, tax_rate)
+        subtotal, tax_amount, total = compute_line_totals(
+            copied, tax_rate, tax_code or None
+        )
         if total <= 0:
             if skipped is not None:
                 who = rec.customer.name if rec.customer else f"schedule {rec.id}"
@@ -148,6 +171,7 @@ def generate_due_invoices(
                 terms=rec.terms,
                 subtotal=subtotal,
                 tax_rate=tax_rate,
+                tax_code_id=tax_code.id if tax_code else None,
                 tax_amount=tax_amount,
                 total=total,
                 balance_due=total,
@@ -214,7 +238,13 @@ def generate_due_invoices(
                         "description": rline.description or "",
                     }
                 )
-            if tax_amount > 0 and tax_account_id:
+            if tax_code:
+                journal_lines.extend(
+                    tax_codes.sales_tax_lines(
+                        db, tax_code, taxable_subtotal(copied), tax_amount
+                    )
+                )
+            elif tax_amount > 0 and tax_account_id:
                 journal_lines.append(
                     {
                         "account_id": tax_account_id,

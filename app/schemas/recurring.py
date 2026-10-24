@@ -46,6 +46,7 @@ class RecurringCreate(StrictModel):
     end_date: Optional[date] = None
     terms: str = "Net 30"
     tax_rate: TaxRateFloat = 0
+    tax_code_id: Optional[int] = None  # None = the single tax_rate above
     notes: Optional[str] = None
     class_id: Optional[int] = None
     job_id: Optional[int] = None
@@ -65,6 +66,7 @@ class RecurringUpdate(StrictModel):
     is_active: Optional[bool] = None
     terms: Optional[str] = None
     tax_rate: Optional[TaxRateFloat] = None
+    tax_code_id: Optional[int] = None  # None = the single tax_rate above
     notes: Optional[str] = None
     class_id: Optional[int] = None
     job_id: Optional[int] = None
@@ -82,6 +84,7 @@ class RecurringResponse(BaseModel):
     is_active: bool = True
     terms: Optional[str] = None
     tax_rate: float = 0
+    tax_code_id: Optional[int] = None  # None = the single tax_rate above
     notes: Optional[str] = None
     class_id: Optional[int] = None
     job_id: Optional[int] = None

@@ -22,6 +22,7 @@ from app.routes.invoices.helpers import (
     resolve_line_taxable,
 )
 from app.routes._helpers import clamp_pagination, reject_null_updates
+from app.services import tax_codes
 from app.services.audit import audited_bulk_delete
 from app.models.estimates import Estimate, EstimateLine, EstimateStatus
 from app.models.invoices import Invoice, InvoiceLine
@@ -110,7 +111,9 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
     # never filled, so its PDF and the invoice it became had no address.
     bill_to = _customer_bill_to(customer)
     resolve_line_taxable(db, data.lines, customer)
-    subtotal, tax_amount, total = compute_line_totals(data.lines, data.tax_rate)
+    tax_code = tax_codes.resolve(db, data.tax_code_id)
+    tax_rate = tax_codes.document_rate(tax_code, data.tax_rate)
+    subtotal, tax_amount, total = compute_line_totals(data.lines, tax_rate, tax_code)
 
     estimate = None
     estimate_number = None
@@ -126,7 +129,8 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
             date=data.date,
             expiration_date=data.expiration_date,
             subtotal=subtotal,
-            tax_rate=data.tax_rate,
+            tax_rate=tax_rate,
+            tax_code_id=tax_code.id if tax_code else None,
             tax_amount=tax_amount,
             total=total,
             notes=data.notes,
@@ -193,6 +197,9 @@ def update_estimate(
     changes = reject_null_updates(
         Estimate, data.model_dump(exclude_unset=True, exclude={"lines"})
     )
+    tax_code = tax_codes.code_for_edit(db, estimate, changes)
+    if changes.get("tax_rate") == estimate.tax_rate and "tax_code_id" not in changes:
+        changes.pop("tax_rate")  # the code's own rate, unchanged
     if changes.get("customer_id") not in (None, estimate.customer_id):
         customer = db.get(Customer, changes["customer_id"])
         if not customer:
@@ -242,19 +249,22 @@ def update_estimate(
             )
             db.add(line)
 
-        tax_rate = data.tax_rate if data.tax_rate is not None else estimate.tax_rate
-        subtotal, tax_amount, total = compute_line_totals(data.lines, tax_rate)
+        subtotal, tax_amount, total = compute_line_totals(
+            data.lines, estimate.tax_rate, tax_code
+        )
         estimate.subtotal = subtotal
         estimate.tax_amount = tax_amount
         estimate.total = total
-    elif "tax_rate" in changes or "customer_id" in changes:
+    elif changes.keys() & {"tax_rate", "tax_code_id", "customer_id"}:
         # A new rate or a new customer without resending the lines: the
         # stored lines are re-totalled (a rate-only edit left the old tax and
         # total in place), and a non-taxable customer's exemption covers them.
         stored = list(estimate.lines)
         if "customer_id" in changes:
             resolve_line_taxable(db, stored, db.get(Customer, estimate.customer_id))
-        subtotal, tax_amount, total = compute_line_totals(stored, estimate.tax_rate)
+        subtotal, tax_amount, total = compute_line_totals(
+            stored, estimate.tax_rate, tax_code
+        )
         estimate.subtotal = subtotal
         estimate.tax_amount = tax_amount
         estimate.total = total
@@ -331,7 +341,12 @@ def convert_to_invoice(
     from app.services.accounting import compute_line_totals, taxed_copy_lines
 
     copied = taxed_copy_lines(estimate.lines, estimate.customer)
-    subtotal, tax_amount, total = compute_line_totals(copied, estimate.tax_rate)
+    # The invoice takes the estimate's tax code, archived or not: it is the
+    # sale the customer was quoted, and its code can be changed after.
+    tax_code = tax_codes.resolve(db, estimate.tax_code_id, for_new=False)
+    subtotal, tax_amount, total = compute_line_totals(
+        copied, estimate.tax_rate, tax_code
+    )
     confirm_zero_total(
         total,
         bool(data and data.allow_zero_total),
@@ -386,6 +401,7 @@ def convert_to_invoice(
         terms=terms,
         subtotal=subtotal,
         tax_rate=estimate.tax_rate,
+        tax_code_id=estimate.tax_code_id,
         tax_amount=tax_amount,
         total=total,
         balance_due=total,

@@ -24,6 +24,9 @@ class SalesTaxPaymentRequest(StrictModel):
     date: Optional[dt_date] = None
     amount: Decimal
     pay_from_account_id: int
+    # The tax account paid down: Sales Tax Payable when none is named, else
+    # one a tax-code component posts to (a county, a GST/HST account).
+    tax_account_id: Optional[int] = None
     check_number: Optional[str] = ""
     reference: Optional[str] = None
 
@@ -112,10 +115,23 @@ def sales_tax_report(
     tax_credited = -sum((r[5] for r in rows if r[0] == "credit_memo"), Decimal(0))
     total_tax = tax_on_sales - tax_credited
 
+    from app.services import tax_codes
+
+    components = [
+        {
+            **row,
+            "rate": float(row["rate"]),
+            "collected": float(row["collected"]),
+            "recoverable": float(row["recoverable"]),
+            "net": float(row["net"]),
+        }
+        for row in tax_codes.component_totals(db, start_date, end_date)
+    ]
     return {
         "start_date": start_date.isoformat(),
         "end_date": end_date.isoformat(),
         "items": items,
+        "components": components,
         "total_sales": float(total_sales),
         "total_taxable": float(total_taxable),
         "total_non_taxable": float(total_sales - total_taxable),
@@ -131,16 +147,22 @@ def _sales_tax_ledger(db: Session, start_date, end_date, total_tax: Decimal):
     to it (sales and credit memos, and anything else that touched it), the
     payments made, the balance owed at the end date, and how far the posted
     tax is from the report's total. A difference names a posting the report
-    cannot see: tax on a bill, a journal entry, a void of an earlier sale."""
-    from sqlalchemy import or_
+    cannot see: tax on a bill, a journal entry, a void of an earlier sale.
+
+    With tax codes, every account a component posts tax owed to is read
+    with 2200 (`accounts` lists them), and tax a purchase claims back
+    through a component is no part of the tax posted on sales: it is in
+    `recoverable`, and nets in the balance when it shares the account."""
+    from sqlalchemy import and_, or_
 
     from app.models.transactions import Transaction, TransactionLine
-    from app.services import control_accounts
+    from app.services import control_accounts, tax_codes
 
     tax_id = control_accounts.find(db, "2200")
     if tax_id is None:
         return None
     account = db.get(Account, tax_id)
+    tax_ids = tax_codes.tax_accounts(db)
 
     def owed(*conds) -> Decimal:
         dr, cr = (
@@ -149,23 +171,31 @@ def _sales_tax_ledger(db: Session, start_date, end_date, total_tax: Decimal):
                 sqlfunc.coalesce(sqlfunc.sum(TransactionLine.credit), 0),
             )
             .join(Transaction, TransactionLine.transaction_id == Transaction.id)
-            .filter(TransactionLine.account_id == tax_id, *conds)
+            .filter(TransactionLine.account_id.in_(tax_ids), *conds)
             .one()
         )
         return _q(Decimal(str(cr)) - Decimal(str(dr)))
 
     in_period = (Transaction.date >= start_date, Transaction.date <= end_date)
     payment = Transaction.source_type == "sales_tax_payment"
-    posted = owed(*in_period, or_(Transaction.source_type.is_(None), ~payment))
+    purchase_doc = Transaction.source_type.in_(tax_codes.PURCHASE_SOURCES)
+    claimed = and_(purchase_doc, TransactionLine.tax_component_id.isnot(None))
+    posted = owed(
+        *in_period, or_(Transaction.source_type.is_(None), ~payment), ~claimed
+    )
     # Tax paid to suppliers that bills and vendor credits posted here before
     # 2.18 (it is part of a purchase's cost now, never Sales Tax Payable).
     # Named so the difference it causes is explained, with the correction.
-    purchase = Transaction.source_type.in_(
-        ("bill", "bill_void", "vendor_credit", "vendor_credit_void")
-    )
+    purchase = and_(purchase_doc, TransactionLine.tax_component_id.is_(None))
+    accounts = [db.get(Account, i) for i in tax_ids]
     return {
         "account_number": account.account_number,
         "account_name": account.name,
+        "accounts": [
+            {"id": a.id, "account_number": a.account_number, "name": a.name}
+            for a in accounts
+        ],
+        "recoverable": float(-owed(*in_period, claimed)),
         "tax_posted": float(posted),
         "payments": float(-owed(*in_period, payment)),
         "balance": float(owed(Transaction.date <= end_date)),
@@ -205,7 +235,20 @@ def pay_sales_tax(data: SalesTaxPaymentRequest, db: Session = Depends(get_db)):
             ),
         )
 
-    tax_account_id = get_sales_tax_account_id(db)
+    if data.tax_account_id is None:
+        tax_account_id = get_sales_tax_account_id(db)
+    else:
+        from app.services import tax_codes
+
+        if data.tax_account_id not in tax_codes.tax_accounts(db):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "That account holds no sales tax. Pay Sales Tax Payable, "
+                    "or an account a tax code's component posts its tax to."
+                ),
+            )
+        tax_account_id = data.tax_account_id
     if not tax_account_id:
         raise HTTPException(
             status_code=400, detail="Sales Tax Payable account (2200) not found"

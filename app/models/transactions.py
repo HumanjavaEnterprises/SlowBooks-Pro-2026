@@ -92,6 +92,10 @@ class TransactionLine(Base):
     job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
     class_id = Column(Integer, ForeignKey("classes.id"), nullable=True)
     cost_code_id = Column(Integer, ForeignKey("cost_codes.id"), nullable=True)
+    # The tax-code component a tax line posts, for the tax reports
+    tax_component_id = Column(
+        Integer, ForeignKey("tax_code_components.id"), nullable=True
+    )
     cost_type = Column(String(20), nullable=True)  # for roll-ups when no code
     # Nonprofit function (program | management | fundraising); defaulted
     # from the class at posting time, NULL = not yet allocated

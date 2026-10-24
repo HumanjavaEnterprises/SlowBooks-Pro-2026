@@ -62,6 +62,7 @@ const ctx = {
 vm.createContext(ctx);
 const pages = {
   'vendors.js': ['PurchaseLines'],
+  'tax_codes.js': ['TaxCodes'],
   'invoices.js': ['SalesLines', 'InvoicesPage'],
   'estimates.js': ['EstimatesPage'],
   'recurring.js': ['RecurringPage'],

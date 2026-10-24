@@ -80,6 +80,7 @@ const SettingsPage = {
             SettingsPage.loadEmailTemplates();
             SettingsPage.loadAiConfig();
             SettingsPage.loadClasses();
+            SettingsPage.loadTaxCodes();
             SettingsPage.loadCostCodes();
             SettingsPage.loadCostTypes();
             SettingsPage.loadEquipment();
@@ -194,6 +195,21 @@ const SettingsPage = {
                                 <option value="a4" ${s.pdf_paper_size === 'a4' ? 'selected' : ''}>A4</option>
                             </select></div>
                     </div>
+                </div>
+
+                <div class="settings-section" role="group" aria-labelledby="settings-h-tax-codes">
+                    <h3 id="settings-h-tax-codes">Tax Codes</h3>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        A tax code is one or more rates charged together (a state, county and city rate, say),
+                        each posted to its own payable account. A component marked recoverable is tax paid on a
+                        purchase that is claimed back: a bill posts it to its own account instead of into what the
+                        lines cost. Documents with no code keep the one Tax Rate they are given. A code's rates and
+                        accounts are fixed once a document uses it; for a new rate, add a code and archive the old one.
+                    </div>
+                    <div style="margin-bottom:12px;" data-admin data-write>
+                        <button type="button" class="btn btn-primary" onclick="SettingsPage.editTaxCode(null)">Add Tax Code</button>
+                    </div>
+                    <div id="tax-codes-list"></div>
                 </div>
 
                 <!-- Desktop app only (shown by loadSignInPref); the session used
@@ -2540,3 +2556,123 @@ SettingsPage.toggleEquipment = async function (id, active) {
     } catch (err) { toast(err.message, 'error'); }
 };
 
+
+
+// --- Tax codes (Settings > Tax Codes, #456) ------------------------------
+SettingsPage.loadTaxCodes = async function () {
+    const el = document.getElementById('tax-codes-list');
+    if (!el) return;
+    try {
+        const codes = await API.get('/tax-codes?include_archived=true');
+        if (!codes.length) {
+            el.innerHTML = '<div class="hint">No tax codes yet. Documents use the one Tax Rate they are given.</div>';
+            return;
+        }
+        const pct = r => `${+(parseFloat(r || 0) * 100).toFixed(4)}%`;
+        el.innerHTML = `<div class="table-container"><table>
+            <thead><tr><th scope="col">Name</th><th scope="col">Components</th><th scope="col">Rate</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
+            <tbody>` + codes.map(c => `<tr>
+                <td>${escapeHtml(c.name)}</td>
+                <td style="font-size:10px;">${c.components.map(p => `${escapeHtml(p.name)} ${pct(p.rate)}${p.is_recoverable ? ' (recoverable)' : ''}`).join(', ')}</td>
+                <td>${pct(c.rate)}</td>
+                <td>${c.is_archived ? 'Archived' : 'Active'}${c.in_use ? ' · in use' : ''}</td>
+                <td class="actions">
+                    <button type="button" class="btn btn-sm btn-secondary" data-admin data-write onclick="SettingsPage.editTaxCode(${c.id})">Edit</button>
+                    <button type="button" class="btn btn-sm btn-secondary" data-admin data-write onclick="SettingsPage.toggleArchiveTaxCode(${c.id}, ${!c.is_archived})">${c.is_archived ? 'Unarchive' : 'Archive'}</button>
+                    ${c.in_use ? '' : `<button type="button" class="btn btn-sm btn-danger" data-destructive data-admin data-write onclick="SettingsPage.deleteTaxCode(${c.id})">Delete</button>`}
+                </td>
+            </tr>`).join('') + `</tbody></table></div>`;
+    } catch (err) {
+        el.innerHTML = `<div style="color:var(--danger); font-size:11px;">${escapeHtml(err.message)}</div>`;
+    }
+};
+
+SettingsPage._taxAccounts = { payable: [], recoverable: [] };
+
+SettingsPage._taxComponentRow = function (c = {}) {
+    const opts = (list, sel, blank) => `<option value="">${blank}</option>` + list.map(a =>
+        `<option value="${a.id}" ${String(a.id) === String(sel ?? '') ? 'selected' : ''}>${escapeHtml(`${a.account_number || ''} ${a.name}`.trim())}</option>`).join('');
+    const pct = c.rate != null ? +(parseFloat(c.rate) * 100).toFixed(4) : '';
+    return `<tr class="tax-component">
+        <td><input class="tc-name" maxlength="50" value="${escapeHtml(c.name || '')}" aria-label="Component name" required></td>
+        <td><input class="tc-rate" type="number" min="0" max="100" step="0.0001" value="${pct}" aria-label="Rate (%)" required style="width:90px;"></td>
+        <td><select class="tc-payable" aria-label="Payable account">${opts(SettingsPage._taxAccounts.payable, c.payable_account_id, 'Sales Tax Payable')}</select></td>
+        <td><input class="tc-recoverable" type="checkbox" aria-label="Recoverable" ${c.is_recoverable ? 'checked' : ''}></td>
+        <td><select class="tc-recoverable-account" aria-label="Recoverable account">${opts(SettingsPage._taxAccounts.recoverable, c.recoverable_account_id, 'None')}</select></td>
+        <td><button type="button" class="btn btn-sm btn-secondary" onclick="this.closest('tr').remove()" aria-label="Remove component">&times;</button></td>
+    </tr>`;
+};
+
+SettingsPage.editTaxCode = async function (id) {
+    let code = { name: '', description: '', components: [{}] };
+    try {
+        const accounts = await API.get('/accounts');
+        SettingsPage._taxAccounts = {
+            payable: accounts.filter(a => a.account_type === 'liability'),
+            recoverable: accounts.filter(a => a.account_type === 'asset' || a.account_type === 'liability'),
+        };
+        if (id) code = await API.get(`/tax-codes/${id}`);
+    } catch (err) { toast(err.message, 'error'); return; }
+    const fixed = id && code.in_use;
+    openModal(id ? `Tax Code: ${escapeHtml(code.name)}` : 'New Tax Code', `
+        <form id="tax-code-form" onsubmit="SettingsPage.saveTaxCode(event, ${id || 'null'})">
+            <div class="form-grid">
+                <div class="form-group"><label>Name *</label>
+                    <input name="name" maxlength="100" required value="${escapeHtml(code.name)}"></div>
+                <div class="form-group full-width"><label>Description</label>
+                    <input name="description" value="${escapeHtml(code.description || '')}"></div>
+            </div>
+            ${fixed ? '<div class="hint" style="margin:8px 0;">This code is on documents already, so its rates and accounts stay as they are. For a new rate, add a new tax code and archive this one.</div>' : ''}
+            <table class="line-items-table" style="margin-top:8px;">
+                <thead><tr><th scope="col">Component</th><th scope="col">Rate (%)</th><th scope="col">Payable account</th>
+                    <th scope="col" title="Tax paid on purchases is claimed back">Recoverable</th><th scope="col">Recoverable account</th><th scope="col"></th></tr></thead>
+                <tbody id="tax-components"${fixed ? ' inert' : ''}>${code.components.map(c => SettingsPage._taxComponentRow(c)).join('')}</tbody>
+            </table>
+            ${fixed ? '' : `<button type="button" class="btn btn-sm btn-secondary" style="margin-top:8px;" onclick="document.getElementById('tax-components').insertAdjacentHTML('beforeend', SettingsPage._taxComponentRow())">+ Add Component</button>`}
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Save</button>
+            </div>
+        </form>`);
+};
+
+SettingsPage.saveTaxCode = async function (e, id) {
+    e.preventDefault();
+    const f = e.target;
+    const body = { name: f.name.value.trim(), description: f.description.value.trim() || null };
+    const rows = $$('#tax-components tr.tax-component');
+    if (!document.getElementById('tax-components').hasAttribute('inert')) {
+        if (!rows.length) { toast('A tax code needs at least one component', 'error'); return; }
+        body.components = rows.map(r => ({
+            name: r.querySelector('.tc-name').value.trim(),
+            rate: (parseFloat(r.querySelector('.tc-rate').value) || 0) / 100,
+            payable_account_id: parseInt(r.querySelector('.tc-payable').value) || null,
+            is_recoverable: r.querySelector('.tc-recoverable').checked,
+            recoverable_account_id: parseInt(r.querySelector('.tc-recoverable-account').value) || null,
+        }));
+    }
+    try {
+        if (id) await API.put(`/tax-codes/${id}`, body);
+        else await API.post('/tax-codes', body);
+        closeModal();
+        toast('Tax code saved');
+        SettingsPage.loadTaxCodes();
+    } catch (err) { toast(err.message, 'error'); }
+};
+
+SettingsPage.toggleArchiveTaxCode = async function (id, archive) {
+    try {
+        await API.put(`/tax-codes/${id}`, { is_archived: archive });
+        toast(archive ? 'Tax code archived' : 'Tax code unarchived');
+        SettingsPage.loadTaxCodes();
+    } catch (err) { toast(err.message, 'error'); }
+};
+
+SettingsPage.deleteTaxCode = async function (id) {
+    if (!confirm('Delete this tax code?')) return;
+    try {
+        await API.del(`/tax-codes/${id}`);
+        toast('Tax code deleted');
+        SettingsPage.loadTaxCodes();
+    } catch (err) { toast(err.message, 'error'); }
+};

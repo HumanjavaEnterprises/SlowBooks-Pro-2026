@@ -74,6 +74,7 @@ from app.routes import reclassify as reclassify_routes
 from app.routes import users as users_routes
 from app.routes import api_tokens as api_tokens_routes
 from app.routes import classes as classes_routes
+from app.routes import tax_codes as tax_codes_routes
 from app.routes import jobs as jobs_routes
 from app.routes import preferences as preferences_routes
 from app.routes import cost_codes as cost_codes_routes
@@ -916,6 +917,9 @@ _ADMIN_WRITE_PREFIXES = (
     "/api/users",
     "/api/tokens",
     "/api/settings",
+    # A tax code's rates and accounts are the company's tax setup, as the
+    # default rate in Settings is.
+    "/api/tax-codes",
     "/api/backups",
     # Turning company-file encryption on or off is an administrator's
     # decision (#290); the route asks for the company's name as well.
@@ -1290,6 +1294,7 @@ app.include_router(auth_routes.router)
 app.include_router(dashboard.router)
 app.include_router(accounts.router)
 app.include_router(classes_routes.router)
+app.include_router(tax_codes_routes.router)
 app.include_router(jobs_routes.router)
 app.include_router(preferences_routes.router)
 app.include_router(cost_codes_routes.router)

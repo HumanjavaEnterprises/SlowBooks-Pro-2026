@@ -21,7 +21,8 @@ from app.schemas.purchase_orders import (
     POResponse,
     POUpdate,
 )
-from app.services.accounting import _q, compute_line_totals
+from app.services import tax_codes
+from app.services.accounting import _q, compute_line_totals, taxable_subtotal
 from app.services.numbering import next_po_number
 from app.services.request_utils import content_disposition
 from app.services.purchase_posting import (
@@ -85,7 +86,9 @@ def create_po(data: POCreate, db: Session = Depends(get_db)):
 
     vendor_id = vendor.id
     vendor_name = vendor.name
-    subtotal, tax_amount, total = compute_line_totals(data.lines, data.tax_rate)
+    tax_code = tax_codes.resolve(db, data.tax_code_id)
+    tax_rate = tax_codes.document_rate(tax_code, data.tax_rate)
+    subtotal, tax_amount, total = compute_line_totals(data.lines, tax_rate, tax_code)
 
     po = None
     po_number = None
@@ -102,7 +105,8 @@ def create_po(data: POCreate, db: Session = Depends(get_db)):
             expected_date=data.expected_date,
             ship_to=data.ship_to,
             subtotal=subtotal,
-            tax_rate=data.tax_rate,
+            tax_rate=tax_rate,
+            tax_code_id=tax_code.id if tax_code else None,
             tax_amount=tax_amount,
             total=total,
             notes=data.notes,
@@ -154,6 +158,8 @@ def update_po(po_id: int, data: POUpdate, db: Session = Depends(get_db)):
     update_data = reject_null_updates(
         PurchaseOrder, data.model_dump(exclude_unset=True, exclude={"lines"})
     )
+    retax = data.tax_rate is not None or "tax_code_id" in update_data
+    tax_code = tax_codes.code_for_edit(db, po, update_data)
     for key, val in update_data.items():
         if key == "status":
             setattr(po, key, POStatus(val))
@@ -179,16 +185,19 @@ def update_po(po_id: int, data: POUpdate, db: Session = Depends(get_db)):
                     line_order=line_data.line_order or i,
                 )
             )
-        tax_rate = data.tax_rate if data.tax_rate is not None else po.tax_rate
-        subtotal, tax_amount, total = compute_line_totals(data.lines, tax_rate)
+        subtotal, tax_amount, total = compute_line_totals(
+            data.lines, po.tax_rate, tax_code
+        )
         po.subtotal = subtotal
         po.tax_amount = tax_amount
         po.total = total
-    elif data.tax_rate is not None:
-        # A new rate without the lines re-totals the stored lines. It changed
-        # the rate and kept the old tax and total, and the bill the order
-        # became carried that tax.
-        subtotal, tax_amount, total = compute_line_totals(po.lines, data.tax_rate)
+    elif retax:
+        # A new rate (or tax code) without the lines re-totals the stored
+        # lines. It changed the rate and kept the old tax and total, and the
+        # bill the order became carried that tax.
+        subtotal, tax_amount, total = compute_line_totals(
+            po.lines, po.tax_rate, tax_code
+        )
         po.subtotal = subtotal
         po.tax_amount = tax_amount
         po.total = total
@@ -311,7 +320,14 @@ def convert_to_bill(
     lines = list(po.lines)
     amounts = [_q(Decimal(str(ln.quantity)) * Decimal(str(ln.rate))) for ln in lines]
     tax_amount = _q(po.tax_amount or 0)
-    tax_shares = spread(tax_amount, amounts)
+    # The bill takes the order's tax code; its recoverable components post
+    # to their own accounts, as an entered bill's do.
+    recoverable, cost_tax = tax_codes.purchase_tax_split(
+        tax_codes.resolve(db, po.tax_code_id, for_new=False),
+        taxable_subtotal(lines),
+        tax_amount,
+    )
+    tax_shares = spread(cost_tax, amounts)
 
     # Where each line posts, decided before anything is written so a
     # refused line leaves no bill behind.
@@ -361,6 +377,7 @@ def convert_to_bill(
         due_date=_due_date_from_terms(po.date, terms),
         subtotal=po.subtotal,
         tax_rate=po.tax_rate,
+        tax_code_id=po.tax_code_id,
         tax_amount=tax_amount,
         total=po.total,
         balance_due=po.total,
@@ -408,6 +425,7 @@ def convert_to_bill(
             )
 
     if journal_lines:
+        journal_lines.extend(tax_codes.recoverable_tax_lines(recoverable))
         journal_lines.append(
             {
                 "account_id": ap_id,

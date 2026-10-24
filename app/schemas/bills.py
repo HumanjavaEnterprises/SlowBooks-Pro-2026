@@ -63,6 +63,7 @@ class BillCreate(StrictModel):
     ref_number: Optional[str] = None
     po_id: Optional[int] = None
     tax_rate: TaxRateFloat = 0
+    tax_code_id: Optional[int] = None  # None = the single tax_rate above
     notes: Optional[str] = None
     class_id: Optional[int] = None
     job_id: Optional[int] = None
@@ -89,6 +90,7 @@ class BillUpdate(StrictModel):
     terms: Optional[str] = None
     ref_number: Optional[str] = None
     tax_rate: Optional[TaxRateFloat] = None
+    tax_code_id: Optional[int] = None  # None = the single tax_rate above
     notes: Optional[str] = None
     class_id: Optional[int] = None
     job_id: Optional[int] = None
@@ -110,6 +112,7 @@ class BillResponse(BaseModel):
     ref_number: Optional[str] = None
     subtotal: Decimal = Decimal("0")
     tax_rate: TaxRateOut = Decimal("0")
+    tax_code_id: Optional[int] = None  # None = the single tax_rate above
     tax_amount: Decimal = Decimal("0")
     total: Decimal = Decimal("0")
     amount_paid: Decimal = Decimal("0")
