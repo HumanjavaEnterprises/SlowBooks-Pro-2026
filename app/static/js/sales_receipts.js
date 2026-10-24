@@ -162,7 +162,7 @@ const SalesReceiptsPage = {
                         <select name="method">
                             <option value="">--</option>
                             <option>Cash</option><option>Check</option>
-                            <option>Credit Card</option><option>ACH/EFT</option><option>Other</option>
+                            <option>Credit Card</option><option>ACH/EFT</option>${typeof canadianMethodOptions === 'function' ? canadianMethodOptions() : ''}<option>Other</option>
                         </select></div>
                     <div class="form-group"><label>Check #</label>
                         <input name="check_number"></div>

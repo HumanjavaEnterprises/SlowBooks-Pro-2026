@@ -919,6 +919,19 @@ function countryOptions(selected) {
 // With Settings' "Warn when a transaction is saved without a class" on
 // (#243), a new document starts with no class chosen — a blank first
 // choice — and ClassWarn.ok asks before it is saved that way.
+// Payment methods a Canadian company sends and receives money by, beside
+// the ones every company has: Interac e-Transfer is how most Canadian
+// customers pay and suppliers are paid. `value` is what the menu stores:
+// the label itself on forms that store labels, a short code on those that
+// store codes (bill payments). Nothing for any other company.
+function canadianMethodOptions(style = 'label') {
+    const s = (typeof App !== 'undefined' && App.settings) || {};
+    if (s.tax_country !== 'CA') return '';
+    return style === 'code'
+        ? '<option value="etransfer">Interac e-Transfer</option>'
+        : '<option>Interac e-Transfer</option>';
+}
+
 async function classFormGroupHtml(selectedId) {
     let classes = [];
     try { classes = await API.get('/classes'); } catch (e) { return ''; }

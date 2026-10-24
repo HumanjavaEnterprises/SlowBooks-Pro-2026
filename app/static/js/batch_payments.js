@@ -40,7 +40,7 @@ const BatchPaymentsPage = {
                     <div class="form-group"><label>Method</label>
                         <select name="method">
                             <option value="check">Check</option><option value="cash">Cash</option>
-                            <option value="ach">ACH</option><option value="credit_card">Credit Card</option>
+                            <option value="ach">ACH</option><option value="credit_card">Credit Card</option>${typeof canadianMethodOptions === 'function' ? canadianMethodOptions('code') : ''}
                         </select></div>
                     <div class="form-group"><label>Reference</label>
                         <input name="reference"></div>

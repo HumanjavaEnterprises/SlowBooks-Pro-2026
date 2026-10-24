@@ -3,6 +3,12 @@
  * Feature 1: Enter bills, pay bills
  */
 const BillsPage = {
+    // How a stored payment method reads: the short codes this page keeps,
+    // with an underscore as a space, and Interac e-Transfer spelled out.
+    methodLabel(method) {
+        return method === 'etransfer' ? 'Interac e-Transfer' : method.replace('_', ' ');
+    },
+
     showAll() {
         BillsPage._showAll = true;
         App.navigate(location.hash || '#/bills');
@@ -114,7 +120,7 @@ const BillsPage = {
         const rows = payments.map(p => {
             const applied = (p.allocations || []).filter(a => a.bill_id === bill.id)
                 .reduce((sum, a) => sum + Number(a.amount), 0);
-            const how = [p.method ? p.method.replace('_', ' ') : '', p.check_number ? `#${p.check_number}` : ''].filter(Boolean).join(' ');
+            const how = [p.method ? BillsPage.methodLabel(p.method) : '', p.check_number ? `#${p.check_number}` : ''].filter(Boolean).join(' ');
             return `<tr${p.is_voided ? ' class="row--dim"' : ''}>
                 <td>${formatDate(p.date)}</td>
                 <td>${escapeHtml(how)}</td>
@@ -151,7 +157,7 @@ const BillsPage = {
         }).join('');
         const applied = allocations.reduce((sum, a) => sum + Number(a.amount), 0);
         const ahead = Math.round((Number(p.amount) - applied) * 100) / 100;
-        const how = [p.method ? p.method.replace('_', ' ') : '', p.check_number ? `#${p.check_number}` : ''].filter(Boolean).join(' ');
+        const how = [p.method ? BillsPage.methodLabel(p.method) : '', p.check_number ? `#${p.check_number}` : ''].filter(Boolean).join(' ');
         const firstBill = allocations.length ? allocations[0].bill_id : null;
         openModal(`Bill Payment — ${p.vendor_name || ''}`, `
             <div style="margin-bottom:12px;">
@@ -644,7 +650,7 @@ const BillsPage = {
                     <div class="form-group"><label>Method</label>
                         <select name="method">
                             <option value="check">Check</option><option value="ach">ACH</option>
-                            <option value="cash">Cash</option><option value="credit_card">Credit Card</option>
+                            <option value="cash">Cash</option><option value="credit_card">Credit Card</option>${typeof canadianMethodOptions === 'function' ? canadianMethodOptions('code') : ''}
                         </select></div>
                     <div class="form-group"><label>Check #</label>
                         <input name="check_number"></div>
